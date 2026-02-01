@@ -62,7 +62,6 @@ export function CarDetail() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
   const [currentImageIndex, setCurrentImageIndex] = useState(0)
-  const [showHeaderPhone, setShowHeaderPhone] = useState(false)
   const [showCardPhone, setShowCardPhone] = useState(false)
   const [showMobilePhone, setShowMobilePhone] = useState(false)
   const [avatarError, setAvatarError] = useState(false)
