@@ -3,10 +3,12 @@ import { Link } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { getDealerCars, getDealerCarsOnSale, setDealerCarDontSell, setDealerCarOnSale, deleteDealerCar } from '@/api/dealer'
 import { getLikedCars } from '@/api/cars'
+import { CarCardSkeleton } from '@/components/cars/CarCardSkeleton'
+import { CarCard } from '@/components/cars/CarCard'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
-import { Spinner } from '@/components/ui/spinner'
+import { Dialog, DialogContent } from '@/components/ui/dialog'
 import {
   Plus,
   Car,
@@ -14,13 +16,13 @@ import {
   Edit,
   CheckCircle,
   XCircle,
-  Heart,
-  FileText,
+  Trash2,
 } from 'lucide-react'
-import { cn } from '@/lib/utils'
-import { getImageUrl, PLACEHOLDER_IMAGE } from '@/api/client'
+import { cn, getErrorMessage } from '@/lib/utils'
+import { getImageUrl } from '@/api/client'
 import { toast } from 'react-hot-toast'
 import type { Car as CarType } from '@/types'
+import { DealerSell } from '@/pages/business/dealer/DealerSell'
 
 // Helper to get name from object or string
 const getName = (value: { name: string } | string | undefined): string | undefined => {
@@ -34,6 +36,8 @@ type TabType = 'on_sale' | 'favorites' | 'drafts'
 export function Garage() {
   const queryClient = useQueryClient()
   const [activeTab, setActiveTab] = useState<TabType>('on_sale')
+  const [isDealerSellOpen, setIsDealerSellOpen] = useState(false)
+  const [activeEditId, setActiveEditId] = useState<string | null>(null)
 
   // Fetch drafts (status=2)
   const { data: draftsResponse, isLoading: draftsLoading } = useQuery({
@@ -55,11 +59,11 @@ export function Garage() {
 
   const cancelMutation = useMutation({
     mutationFn: ({ id }: { id: number; car: CarType }) => setDealerCarDontSell(id),
-    onMutate: async ({ car }) => {
+    onMutate: async ({ car }: { id: number; car: CarType }) => {
       await queryClient.cancelQueries({ queryKey: ['dealer-cars-active'] })
       await queryClient.cancelQueries({ queryKey: ['dealer-cars-drafts'] })
-      const prevActive = queryClient.getQueryData(['dealer-cars-active']) as { items: CarType[] } | undefined
-      const prevDrafts = queryClient.getQueryData(['dealer-cars-drafts']) as { items: CarType[] } | undefined
+      const prevActive = queryClient.getQueryData<{ items: CarType[] }>(['dealer-cars-active'])
+      const prevDrafts = queryClient.getQueryData<{ items: CarType[] }>(['dealer-cars-drafts'])
       if (prevActive) {
         queryClient.setQueryData(['dealer-cars-active'], {
           ...prevActive,
@@ -74,10 +78,11 @@ export function Garage() {
       }
       return { prevActive, prevDrafts }
     },
-    onError: (_err, _vars, ctx) => {
+    onError: (err: unknown, _vars, ctx) => {
       if (ctx?.prevActive) queryClient.setQueryData(['dealer-cars-active'], ctx.prevActive)
       if (ctx?.prevDrafts) queryClient.setQueryData(['dealer-cars-drafts'], ctx.prevDrafts)
-      toast.error('Failed to deactivate listing')
+      
+      toast.error(getErrorMessage(err, 'Failed to deactivate listing'))
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['dealer-cars-drafts'] })
@@ -88,11 +93,11 @@ export function Garage() {
 
   const relistMutation = useMutation({
     mutationFn: ({ id }: { id: number; car: CarType }) => setDealerCarOnSale(id),
-    onMutate: async ({ car }) => {
+    onMutate: async ({ car }: { id: number; car: CarType }) => {
       await queryClient.cancelQueries({ queryKey: ['dealer-cars-active'] })
       await queryClient.cancelQueries({ queryKey: ['dealer-cars-drafts'] })
-      const prevActive = queryClient.getQueryData(['dealer-cars-active']) as { items: CarType[] } | undefined
-      const prevDrafts = queryClient.getQueryData(['dealer-cars-drafts']) as { items: CarType[] } | undefined
+      const prevActive = queryClient.getQueryData<{ items: CarType[] }>(['dealer-cars-active'])
+      const prevDrafts = queryClient.getQueryData<{ items: CarType[] }>(['dealer-cars-drafts'])
       if (prevDrafts) {
         queryClient.setQueryData(['dealer-cars-drafts'], {
           ...prevDrafts,
@@ -107,10 +112,11 @@ export function Garage() {
       }
       return { prevActive, prevDrafts }
     },
-    onError: (_err, _vars, ctx) => {
+    onError: (err, _vars, ctx) => {
       if (ctx?.prevActive) queryClient.setQueryData(['dealer-cars-active'], ctx.prevActive)
       if (ctx?.prevDrafts) queryClient.setQueryData(['dealer-cars-drafts'], ctx.prevDrafts)
-      toast.error('Failed to relist car')
+      
+      toast.error(getErrorMessage(err, 'Failed to relist car'))
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['dealer-cars-drafts'] })
@@ -126,8 +132,8 @@ export function Garage() {
       queryClient.invalidateQueries({ queryKey: ['dealer-cars-active'] })
       toast.success('Car deleted successfully')
     },
-    onError: () => {
-      toast.error('Failed to delete car')
+    onError: (err: unknown) => {
+      toast.error(getErrorMessage(err, 'Failed to delete car'))
     }
   })
 
@@ -154,250 +160,197 @@ export function Garage() {
       maximumFractionDigits: 0,
     }).format(price)
 
+  const handleAddCarClick = () => {
+    setActiveEditId(null)
+    setIsDealerSellOpen(true)
+  }
+
+  const handleEditCarClick = (carId: number) => {
+    setActiveEditId(String(carId))
+    setIsDealerSellOpen(true)
+  }
+
   const CarItem = ({ car }: { car: CarType }) => {
     const imageUrl = getImageUrl(car.images?.[0])
     // Determine status for badge
     const isActive = activeCars.some(c => c.id === car.id)
     const isSold = car.status === 'sold' || car.status === 3
     
-    const brandName = getName((car as unknown as Record<string, unknown>).brand as { name: string } | string)
-    const modelName = getName((car as unknown as Record<string, unknown>).model as { name: string } | string)
-    const cityName = getName((car as unknown as Record<string, unknown>).city as { name: string } | string)
-    const mileage = (car as unknown as Record<string, unknown>).mileage as number | undefined || car.odometer || 0
-
     return (
-      <Card className="overflow-hidden">
-        <div className="flex flex-col sm:flex-row">
-          {/* Image */}
-          <Link to={`/cars/${car.id}`} className="sm:w-48 shrink-0">
-            <div className="aspect-video sm:aspect-square relative bg-muted">
-              <img
-                src={imageUrl}
-                alt={`${brandName || ''} ${modelName || ''}`}
-                className="w-full h-full object-cover"
-                onError={(e) => {
-                  const img = e.target as HTMLImageElement
-                  if (!img.src.endsWith(PLACEHOLDER_IMAGE)) {
-                    img.src = PLACEHOLDER_IMAGE
-                  }
-                }}
-              />
-              {!isActive && (
-                <div className="absolute inset-0 bg-black/50 flex items-center justify-center">
-                  <Badge variant={isSold ? 'success' : 'secondary'}>
-                    {isSold ? 'Sold' : 'Draft/Inactive'}
-                  </Badge>
-                </div>
-              )}
+      <Card className="overflow-hidden hover:shadow-md transition-shadow">
+        <div className="aspect-video w-full relative bg-gray-100">
+          {imageUrl ? (
+            <img 
+              src={imageUrl} 
+              alt={getName(car.model)} 
+              className="w-full h-full object-cover"
+            />
+          ) : (
+            <div className="w-full h-full flex items-center justify-center text-gray-400">
+              <Car className="w-12 h-12" />
             </div>
-          </Link>
-
-          {/* Content */}
-          <div className="flex-1 p-4">
-            <div className="flex items-start justify-between">
-              <div>
-                <Link to={`/cars/${car.id}`}>
-                  <h3 className="font-semibold hover:text-primary transition-colors">
-                    {brandName} {modelName}
-                  </h3>
-                </Link>
-                <p className="text-sm text-muted-foreground">
-                  {car.year} &bull; {mileage?.toLocaleString()} km
-                </p>
-              </div>
-              <p className="text-lg font-bold text-primary">{formatPrice(car.price)}</p>
-            </div>
-
-            {/* Stats */}
-            <div className="flex items-center gap-4 mt-3 text-sm text-muted-foreground">
-              <span className="flex items-center gap-1">
-                <Eye className="h-4 w-4" />
-                {car.view_count || 0} views
-              </span>
-              {cityName && (
-                <span>{cityName}</span>
-              )}
-            </div>
-
-            {/* Actions */}
-            <div className="flex items-center gap-2 mt-4">
-              {/* Edit button available for own cars */}
-              <Button size="sm" variant="outline" asChild>
-                <Link to={`/biz/dealer/new?editId=${car.id}`}>
-                  <Edit className="h-4 w-4 mr-1" />
-                  Edit
-                </Link>
-              </Button>
-
-              {isActive ? (
-                <>
-                  <Button
-                    size="sm"
-                    variant="destructive"
-                    onClick={() => deleteMutation.mutate(car.id)}
-                    disabled={deleteMutation.isPending}
-                  >
-                    <XCircle className="h-4 w-4 mr-1" />
-                    Delete
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => cancelMutation.mutate({ id: car.id, car })}
-                    disabled={cancelMutation.isPending}
-                  >
-                    <XCircle className="h-4 w-4 mr-1" />
-                    Deactivate
-                  </Button>
-                </>
-              ) : !isSold && (
-                <>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => relistMutation.mutate({ id: car.id, car })}
-                    disabled={relistMutation.isPending}
-                  >
-                    <CheckCircle className="h-4 w-4 mr-1" />
-                    Reactivate
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="destructive"
-                    onClick={() => deleteMutation.mutate(car.id)}
-                    disabled={deleteMutation.isPending}
-                  >
-                    <XCircle className="h-4 w-4 mr-1" />
-                    Delete
-                  </Button>
-                </>
-              )}
-            </div>
+          )}
+          <div className="absolute top-2 right-2">
+            <Badge variant={isActive ? "default" : "secondary"}>
+              {isActive ? "On Sale" : isSold ? "Sold" : "Draft"}
+            </Badge>
           </div>
         </div>
+        <CardContent className="p-4">
+          <div className="flex justify-between items-start mb-2">
+            <div>
+              <h3 className="font-semibold text-lg line-clamp-1">
+                {getName(car.brand)} {getName(car.model)}
+              </h3>
+              <p className="text-sm text-gray-500">
+                {car.year} • {car.odometer} km
+              </p>
+            </div>
+            <p className="font-bold text-lg text-primary">
+              {formatPrice(car.price)}
+            </p>
+          </div>
+          
+          <div className="flex gap-2 mt-4">
+            <Button 
+              variant="outline" 
+              size="sm" 
+              className="flex-1"
+              asChild
+            >
+              <Link to={`/cars/${car.id}`}>
+                <Eye className="w-4 h-4 mr-2" />
+                View
+              </Link>
+            </Button>
+            <Button 
+              variant="outline" 
+              size="sm" 
+              className="flex-1"
+              onClick={() => handleEditCarClick(car.id)}
+            >
+              <Edit className="w-4 h-4 mr-2" />
+              Edit
+            </Button>
+            {isActive ? (
+              <Button 
+                variant="secondary" 
+                size="sm"
+                onClick={() => cancelMutation.mutate({ id: car.id, car })}
+                disabled={cancelMutation.isPending}
+              >
+                <XCircle className="w-4 h-4" />
+              </Button>
+            ) : (
+              <Button 
+                variant="default" 
+                size="sm"
+                onClick={() => relistMutation.mutate({ id: car.id, car })}
+                disabled={relistMutation.isPending}
+              >
+                <CheckCircle className="w-4 h-4" />
+              </Button>
+            )}
+            <Button
+              variant="destructive"
+              size="sm"
+              onClick={() => {
+                if (window.confirm('Are you sure you want to delete this car?')) {
+                  deleteMutation.mutate(car.id)
+                }
+              }}
+              disabled={deleteMutation.isPending}
+            >
+              <Trash2 className="w-4 h-4" />
+            </Button>
+          </div>
+        </CardContent>
       </Card>
     )
   }
 
   return (
-    <div className="container mx-auto px-4 py-8">
-      <div className="flex items-center justify-between mb-8">
-        <div>
-          <h1 className="text-3xl font-bold">My Garage</h1>
-          <p className="text-muted-foreground">Manage your car listings</p>
-        </div>
-        <Button asChild>
-          <Link to="/biz/dealer/new">
-            <Plus className="h-4 w-4 mr-2" />
-            Add Car
-          </Link>
+    <div className="container py-6 space-y-6">
+      <div className="flex items-center justify-between">
+        <h1 className="text-3xl font-bold">Garage</h1>
+        <Button onClick={handleAddCarClick}>
+          <Plus className="w-4 h-4 mr-2" />
+          Add Car
         </Button>
       </div>
 
-      {/* Stats cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-8">
-        <Card>
-          <CardContent className="p-4">
-            <div className="flex items-center gap-3">
-              <div className="p-2 bg-primary/10 rounded-lg">
-                <Car className="h-5 w-5 text-primary" />
-              </div>
-              <div>
-                <p className="text-2xl font-bold">{activeCars.length}</p>
-                <p className="text-sm text-muted-foreground">On Sale</p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardContent className="p-4">
-            <div className="flex items-center gap-3">
-              <div className="p-2 bg-red-500/10 rounded-lg">
-                <Heart className="h-5 w-5 text-red-500" />
-              </div>
-              <div>
-                <p className="text-2xl font-bold">{favorites.length}</p>
-                <p className="text-sm text-muted-foreground">Favorites</p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardContent className="p-4">
-            <div className="flex items-center gap-3">
-              <div className="p-2 bg-gray-500/10 rounded-lg">
-                <FileText className="h-5 w-5 text-gray-500" />
-              </div>
-              <div>
-                <p className="text-2xl font-bold">
-                  {draftCars.length}
-                </p>
-                <p className="text-sm text-muted-foreground">Drafts</p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
+      <div className="flex space-x-1 bg-muted p-1 rounded-lg w-fit">
+        <button
+          onClick={() => setActiveTab('on_sale')}
+          className={cn(
+            "px-4 py-2 rounded-md text-sm font-medium transition-colors",
+            activeTab === 'on_sale' 
+              ? "bg-background text-foreground shadow-sm" 
+              : "text-muted-foreground hover:bg-background/50"
+          )}
+        >
+          On Sale ({activeCars.length})
+        </button>
+        <button
+          onClick={() => setActiveTab('favorites')}
+          className={cn(
+            "px-4 py-2 rounded-md text-sm font-medium transition-colors",
+            activeTab === 'favorites' 
+              ? "bg-background text-foreground shadow-sm" 
+              : "text-muted-foreground hover:bg-background/50"
+          )}
+        >
+          Favorites ({favorites.length})
+        </button>
+        <button
+          onClick={() => setActiveTab('drafts')}
+          className={cn(
+            "px-4 py-2 rounded-md text-sm font-medium transition-colors",
+            activeTab === 'drafts' 
+              ? "bg-background text-foreground shadow-sm" 
+              : "text-muted-foreground hover:bg-background/50"
+          )}
+        >
+          Drafts ({draftCars.length})
+        </button>
       </div>
 
-      {/* Tabs */}
-      <div className="flex gap-2 mb-6 border-b border-border">
-        {[
-          { id: 'on_sale', label: 'On Sale', count: activeCars.length },
-          { id: 'favorites', label: 'Favorites', count: favorites.length },
-          { id: 'drafts', label: 'Drafts', count: draftCars.length }
-        ].map((tab) => (
-          <button
-            key={tab.id}
-            onClick={() => setActiveTab(tab.id as TabType)}
-            className={cn(
-              'px-4 py-2 font-medium transition-colors border-b-2 -mb-px',
-              activeTab === tab.id
-                ? 'border-primary text-primary'
-                : 'border-transparent text-muted-foreground hover:text-foreground'
-            )}
-          >
-            {tab.label}
-            <span className="ml-2 text-xs bg-secondary px-2 py-0.5 rounded-full">
-              {tab.count}
-            </span>
-          </button>
-        ))}
-      </div>
-
-      {/* Car list */}
       {isLoading ? (
-        <div className="flex justify-center py-12">
-          <Spinner size="lg" />
-        </div>
-      ) : displayedCars.length === 0 ? (
-        <Card>
-          <CardContent className="py-12 text-center">
-            <Car className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
-            <h3 className="text-lg font-semibold mb-2">No cars found</h3>
-            <p className="text-muted-foreground mb-4">
-              {activeTab === 'on_sale' ? 'You have no active listings.' :
-               activeTab === 'favorites' ? 'You haven\'t liked any cars yet.' :
-               'You have no drafts.'}
-            </p>
-            {activeTab === 'on_sale' && (
-              <Button asChild>
-                <Link to="/biz/dealer/new">
-                  <Plus className="h-4 w-4 mr-2" />
-                  Add your first car
-                </Link>
-              </Button>
-            )}
-          </CardContent>
-        </Card>
-      ) : (
-        <div className="space-y-4">
-          {displayedCars.map((car) => (
-            <CarItem key={car.id} car={car} />
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          {[1, 2, 3].map((i) => (
+            <CarCardSkeleton key={i} />
           ))}
         </div>
+      ) : displayedCars.length > 0 ? (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          {displayedCars.map((car) => (
+            activeTab === 'favorites' ? (
+              <CarCard key={car.id} car={car} />
+            ) : (
+              <CarItem key={car.id} car={car} />
+            )
+          ))}
+        </div>
+      ) : (
+        <div className="text-center py-12 text-muted-foreground">
+          <Car className="w-12 h-12 mx-auto mb-4 opacity-50" />
+          <p>No cars found in this section</p>
+        </div>
       )}
+
+      <Dialog open={isDealerSellOpen} onOpenChange={setIsDealerSellOpen}>
+        <DialogContent className="max-h-[90vh] overflow-y-auto p-0">
+          <DealerSell 
+            editId={activeEditId} 
+            onSuccess={() => {
+              setIsDealerSellOpen(false)
+              setActiveEditId(null)
+              queryClient.invalidateQueries({ queryKey: ['dealer-cars-active'] })
+              queryClient.invalidateQueries({ queryKey: ['dealer-cars-drafts'] })
+            }}
+          />
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

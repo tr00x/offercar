@@ -1,31 +1,37 @@
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
+import React, { useEffect, useState } from 'react'
+import { BrowserRouter, Routes, Route, Navigate, useLocation, useNavigate } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { AuthProvider, useAuth } from '@/store/auth'
+import { ThemeProvider } from '@/store/theme'
+import { ChatProvider } from '@/store/chat'
 import { Layout } from '@/components/layout/Layout'
 import { Spinner } from '@/components/ui/spinner'
+import { Dialog, DialogContent } from '@/components/ui/dialog'
 
 // Pages
+import { Index } from '@/pages/Index'
 import { Home } from '@/pages/Home'
 import { CarDetail } from '@/pages/CarDetail'
-import { Auth } from '@/pages/Auth'
 import { Profile } from '@/pages/Profile'
-import { PublicProfile } from '@/pages/PublicProfile'
+import { UserGarage } from '@/pages/UserGarage'
 import { UserSell } from '@/pages/user/UserSell'
 import { DealerSell } from '@/pages/business/dealer/DealerSell'
-import { Favorites } from '@/pages/Favorites'
 import { Messages } from '@/pages/Messages'
 import { Chat } from '@/pages/Chat'
 import { BusinessApply } from '@/pages/business/Apply'
-import { BusinessLogin } from '@/pages/business/Login'
 import { Garage } from '@/pages/business/dealer/Garage'
-import { LogisticDashboard } from '@/pages/business/logistic/Dashboard'
-import { NewRoute } from '@/pages/business/logistic/NewRoute'
 import { BrokerDashboard } from '@/pages/business/broker/Dashboard'
 import { SearchCars } from '@/pages/business/broker/SearchCars'
 import { ServiceDashboard } from '@/pages/business/service/Dashboard'
 import { NewAppointment } from '@/pages/business/service/NewAppointment'
 import { BusinessProfile } from '@/pages/business/Profile'
 import { Businesses } from '@/pages/Businesses'
+
+// Info pages
+import { HelpCenter } from '@/pages/info/HelpCenter'
+import { Contact } from '@/pages/info/Contact'
+import { Privacy } from '@/pages/info/Privacy'
+import { Terms } from '@/pages/info/Terms'
 
 import './index.css'
 
@@ -40,9 +46,34 @@ const queryClient = new QueryClient({
   },
 })
 
-// Protected route wrapper
-function ProtectedRoute({ children }: { children: React.ReactNode }) {
-  const { isAuthenticated, isLoading } = useAuth()
+type ProtectedRouteProps = {
+  children: React.ReactNode
+  allowedRoles?: number[]
+}
+
+function getBusinessDashboardPath(roleId?: number) {
+  switch (roleId) {
+    case 2:
+      return '/biz/dealer/garage'
+    case 3:
+      return '/biz/logistic/dashboard'
+    case 4:
+      return '/biz/broker/dashboard'
+    case 5:
+      return '/biz/service/dashboard'
+    default:
+      return '/'
+  }
+}
+
+function ProtectedRoute({ children, allowedRoles }: ProtectedRouteProps) {
+  const { isAuthenticated, isLoading, user, openAuthModal } = useAuth()
+
+  useEffect(() => {
+    if (!isLoading && !isAuthenticated) {
+      openAuthModal()
+    }
+  }, [isLoading, isAuthenticated, openAuthModal])
 
   if (isLoading) {
     return (
@@ -53,22 +84,82 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
   }
 
   if (!isAuthenticated) {
-    return <Navigate to="/auth" replace />
+    return <Navigate to="/" replace />
+  }
+
+  if (allowedRoles && allowedRoles.length > 0) {
+    const roleId = user?.role_id
+    if (!roleId || !allowedRoles.includes(roleId)) {
+      const redirectPath = getBusinessDashboardPath(roleId)
+      return <Navigate to={redirectPath} replace />
+    }
   }
 
   return <>{children}</>
 }
 
+function BizGarageRedirect() {
+  const { user } = useAuth()
+  const to = getBusinessDashboardPath(user?.role_id)
+  return <Navigate to={to} replace />
+}
+
+function ScrollToTop() {
+  const location = useLocation()
+
+  React.useEffect(() => {
+    window.scrollTo({ top: 0, left: 0, behavior: 'instant' as ScrollBehavior })
+  }, [location.pathname])
+
+  return null
+}
+
+function HomeWithKey() {
+  const location = useLocation()
+  return <Home key={location.search} />
+}
+
+function UserSellModalRoute() {
+  const { user } = useAuth()
+  const navigate = useNavigate()
+
+  if (user?.role_id && user.role_id !== 2) {
+    const redirectPath = getBusinessDashboardPath(user.role_id)
+    return <Navigate to={redirectPath} replace />
+  }
+
+  return (
+    <Dialog open onOpenChange={(open) => !open && navigate(-1)}>
+      <DialogContent fullScreen>
+        <UserSell />
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+function DealerSellModalRoute() {
+  const navigate = useNavigate()
+
+  return (
+    <Dialog open onOpenChange={(open) => !open && navigate(-1)}>
+      <DialogContent fullScreen>
+        <DealerSell />
+      </DialogContent>
+    </Dialog>
+  )
+}
+
 function AppRoutes() {
   return (
-    <Routes>
-      <Route path="/" element={<Layout />}>
+    <>
+      <ScrollToTop />
+      <Routes>
+        <Route path="/" element={<Layout />}>
         {/* Public routes */}
-        <Route index element={<Home />} />
-        <Route path="cars" element={<Home />} />
+        <Route index element={<Index />} />
+        <Route path="index" element={<Index />} />
+        <Route path="cars" element={<HomeWithKey />} />
         <Route path="cars/:id" element={<CarDetail />} />
-        <Route path="user/:id" element={<PublicProfile />} />
-        <Route path="auth" element={<Auth />} />
 
         {/* Protected user routes */}
         <Route
@@ -80,21 +171,22 @@ function AppRoutes() {
           }
         />
         <Route
-          path="sell"
+          path="garage"
           element={
             <ProtectedRoute>
-              <UserSell />
+              <UserGarage />
             </ProtectedRoute>
           }
         />
         <Route
-          path="favorites"
+          path="sell"
           element={
             <ProtectedRoute>
-              <Favorites />
+              <UserSellModalRoute />
             </ProtectedRoute>
           }
         />
+
         <Route
           path="messages"
           element={
@@ -115,14 +207,20 @@ function AppRoutes() {
         {/* Business routes */}
         <Route path="biz" element={<Businesses />} />
         <Route path="biz/apply" element={<BusinessApply />} />
-        <Route path="biz/auth" element={<BusinessLogin />} />
-        <Route path="biz/garage" element={<Navigate to="/biz/dealer/garage" replace />} />
+        <Route
+          path="biz/garage"
+          element={
+            <ProtectedRoute allowedRoles={[2, 3, 4, 5]}>
+              <BizGarageRedirect />
+            </ProtectedRoute>
+          }
+        />
         
         {/* Dealer Routes */}
         <Route
           path="biz/dealer/garage"
           element={
-            <ProtectedRoute>
+            <ProtectedRoute allowedRoles={[2]}>
               <Garage />
             </ProtectedRoute>
           }
@@ -130,35 +228,27 @@ function AppRoutes() {
         <Route
           path="biz/dealer/new"
           element={
-            <ProtectedRoute>
-              <DealerSell />
+            <ProtectedRoute allowedRoles={[2]}>
+              <DealerSellModalRoute />
             </ProtectedRoute>
           }
         />
 
-        {/* Logistic Routes */}
+        {/* Logistic Routes - Redirect to Profile */}
         <Route
           path="biz/logistic/dashboard"
-          element={
-            <ProtectedRoute>
-              <LogisticDashboard />
-            </ProtectedRoute>
-          }
+          element={<Navigate to="/biz/profile" replace />}
         />
         <Route
           path="biz/logistic/new"
-          element={
-            <ProtectedRoute>
-              <NewRoute />
-            </ProtectedRoute>
-          }
+          element={<Navigate to="/biz/profile" replace />}
         />
 
         {/* Broker Routes */}
         <Route
           path="biz/broker/dashboard"
           element={
-            <ProtectedRoute>
+            <ProtectedRoute allowedRoles={[4]}>
               <BrokerDashboard />
             </ProtectedRoute>
           }
@@ -166,7 +256,7 @@ function AppRoutes() {
         <Route
           path="biz/broker/search"
           element={
-            <ProtectedRoute>
+            <ProtectedRoute allowedRoles={[4]}>
               <SearchCars />
             </ProtectedRoute>
           }
@@ -176,7 +266,7 @@ function AppRoutes() {
         <Route
           path="biz/service/dashboard"
           element={
-            <ProtectedRoute>
+            <ProtectedRoute allowedRoles={[5]}>
               <ServiceDashboard />
             </ProtectedRoute>
           }
@@ -184,7 +274,7 @@ function AppRoutes() {
         <Route
           path="biz/service/new"
           element={
-            <ProtectedRoute>
+            <ProtectedRoute allowedRoles={[5]}>
               <NewAppointment />
             </ProtectedRoute>
           }
@@ -199,23 +289,61 @@ function AppRoutes() {
           }
         />
 
+        {/* Info pages */}
+        <Route path="help" element={<HelpCenter />} />
+        <Route path="contact" element={<Contact />} />
+        <Route path="privacy" element={<Privacy />} />
+        <Route path="terms" element={<Terms />} />
+
         {/* Catch-all redirect */}
         <Route path="*" element={<Navigate to="/" replace />} />
       </Route>
     </Routes>
+    </>
   )
 }
 
 function App() {
+  const [isMobile, setIsMobile] = useState(false)
+
+  useEffect(() => {
+    const update = () => setIsMobile(window.innerWidth < 768)
+    update()
+    window.addEventListener('resize', update)
+    return () => window.removeEventListener('resize', update)
+  }, [])
+
   return (
-    <QueryClientProvider client={queryClient}>
-      <BrowserRouter>
-        <AuthProvider>
-          <AppRoutes />
-          <Toaster position="top-right" />
-        </AuthProvider>
-      </BrowserRouter>
-    </QueryClientProvider>
+    <ThemeProvider>
+      <QueryClientProvider client={queryClient}>
+        <BrowserRouter>
+          <AuthProvider>
+            <ChatProvider>
+            <AppRoutes />
+            <Toaster
+            position={isMobile ? 'top-center' : 'top-right'}
+            toastOptions={{
+              className:
+                'mt-16 rounded-xl border border-white/10 bg-slate-900 text-slate-50 shadow-lg shadow-black/40 px-4 py-3 text-sm',
+              success: {
+                iconTheme: {
+                  primary: '#22c55e',
+                  secondary: '#020617',
+                },
+              },
+              error: {
+                iconTheme: {
+                  primary: '#ef4444',
+                  secondary: '#020617',
+                },
+              },
+            }}
+          />
+            </ChatProvider>
+          </AuthProvider>
+        </BrowserRouter>
+      </QueryClientProvider>
+    </ThemeProvider>
   )
 }
 

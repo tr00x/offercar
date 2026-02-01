@@ -1,10 +1,15 @@
 import apiClient from './client'
+import type { City } from '@/types'
 
 export interface Business {
   id: number
   username?: string
   avatar?: string
+  banner?: string
+  address?: string
   registered?: string
+  city?: City
+  city_id?: number
 }
 
 export interface GetBusinessesParams {

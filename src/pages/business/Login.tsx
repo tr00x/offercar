@@ -1,18 +1,18 @@
 import { useState } from 'react'
-import { useNavigate, Link } from 'react-router-dom'
+import { useNavigate } from 'react-router-dom'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Spinner } from '@/components/ui/spinner'
 import { useAuth } from '@/store/auth'
 import { loginBusiness, setTokens } from '@/api/auth'
-import { Building2 } from 'lucide-react'
+import { ArrowLeft, AlertCircle } from 'lucide-react'
 import { toast } from 'react-hot-toast'
-import type { AxiosError } from 'axios'
+import { getErrorMessage } from '@/lib/utils'
+import { getProfile, getThirdPartyProfile } from '@/api/profile'
 
 const loginSchema = z.object({
   email: z.string().email('Please enter a valid email'),
@@ -21,7 +21,13 @@ const loginSchema = z.object({
 
 type LoginFormData = z.infer<typeof loginSchema>
 
-export function BusinessLogin() {
+type BusinessLoginCardProps = {
+  onUserLoginClick?: () => void
+  onRegisterClick?: () => void
+  onSuccess?: () => void
+}
+
+export function BusinessLoginCard({ onUserLoginClick, onRegisterClick, onSuccess }: BusinessLoginCardProps) {
   const navigate = useNavigate()
   const { refreshUser } = useAuth()
   const [isLoading, setIsLoading] = useState(false)
@@ -35,7 +41,7 @@ export function BusinessLogin() {
     },
   })
 
-const onSubmit = async (data: LoginFormData) => {
+  const onSubmit = async (data: LoginFormData) => {
     setError(null)
     setIsLoading(true)
 
@@ -43,21 +49,21 @@ const onSubmit = async (data: LoginFormData) => {
       const response = await loginBusiness(data)
       setTokens(response.access_token, response.refresh_token)
       await refreshUser()
-      
-      // Get role for redirect
-      let roleId = 2 // Default to dealer
+
+      let roleId = 2
       try {
         const profile = await getProfile()
-        roleId = profile.role_id
-        
-        // Check third party profile if role seems to be user
+        if (typeof profile.role_id === 'number') {
+          roleId = profile.role_id
+        }
+
         if (!roleId || roleId < 2) {
           try {
             const thirdParty = await getThirdPartyProfile()
             if (thirdParty?.role_id) {
               roleId = thirdParty.role_id
             }
-          } catch (e) {
+          } catch {
             // ignore
           }
         }
@@ -66,8 +72,11 @@ const onSubmit = async (data: LoginFormData) => {
       }
 
       toast.success('Login successful!')
-      
-      // Redirect based on role
+
+      if (onSuccess) {
+        onSuccess()
+      }
+
       switch (roleId) {
         case 2: navigate('/biz/dealer/garage'); break;
         case 3: navigate('/biz/logistic/dashboard'); break;
@@ -76,18 +85,7 @@ const onSubmit = async (data: LoginFormData) => {
         default: navigate('/biz/dealer/garage');
       }
     } catch (err: unknown) {
-      let message = 'Invalid email or password'
-      const axiosErr = err as AxiosError<{ message?: string; error?: string }>
-      // Extract server-provided message if available
-      const serverMsg =
-        axiosErr?.response?.data?.message ||
-        axiosErr?.response?.data?.error ||
-        axiosErr?.message
-      if (serverMsg) {
-        message = typeof serverMsg === 'string' ? serverMsg : message
-      } else if (err instanceof Error) {
-        message = err.message
-      }
+      const message = getErrorMessage(err, 'Invalid email or password')
       setError(message)
       toast.error(message)
     } finally {
@@ -96,82 +94,88 @@ const onSubmit = async (data: LoginFormData) => {
   }
 
   return (
-    <div className="min-h-[80vh] flex items-center justify-center px-4">
-      <Card className="w-full max-w-md">
-        <CardHeader className="text-center">
-          <div className="flex justify-center mb-4">
-            <div className="p-3 bg-primary/10 rounded-full">
-              <Building2 className="h-8 w-8 text-primary" />
-            </div>
-          </div>
-          <CardTitle className="text-2xl">Business Login</CardTitle>
-          <CardDescription>
-            Sign in to manage your dealership
-          </CardDescription>
-          <div className="mt-3 text-xs text-muted-foreground">
-            Use the password sent in approval email.
-          </div>
-        </CardHeader>
+    <div className="w-full max-w-sm mx-auto py-4">
+      <h2 className="text-xl font-semibold text-foreground text-center mb-1">Business Login</h2>
+      <p className="text-muted-foreground text-center text-sm mb-6">
+        Sign in to your business account
+      </p>
 
-        <CardContent>
-          {error && (
-            <div className="bg-destructive/10 text-destructive text-sm rounded-lg p-3 mb-4">
-              {error}
-            </div>
+      {error && (
+        <div className="flex items-center gap-2 mb-4 p-3 rounded-lg bg-destructive/10 text-destructive text-sm">
+          <AlertCircle className="h-4 w-4 shrink-0" />
+          <span>{error}</span>
+        </div>
+      )}
+
+      <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
+        <div className="space-y-1.5">
+          <Label htmlFor="biz-email">Email address</Label>
+          <Input
+            id="biz-email"
+            type="email"
+            placeholder="Enter your business email"
+            {...form.register('email')}
+          />
+          {form.formState.errors.email && (
+            <p className="text-xs text-destructive">
+              {form.formState.errors.email.message}
+            </p>
           )}
+        </div>
 
-          <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="email">Email address</Label>
-              <Input
-                id="email"
-                type="email"
-                placeholder="Enter your business email"
-                {...form.register('email')}
-              />
-              {form.formState.errors.email && (
-                <p className="text-sm text-destructive">
-                  {form.formState.errors.email.message}
-                </p>
-              )}
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="password">Password</Label>
-              <Input
-                id="password"
-                type="password"
-                placeholder="Enter your password"
-                {...form.register('password')}
-              />
-              {form.formState.errors.password && (
-                <p className="text-sm text-destructive">
-                  {form.formState.errors.password.message}
-                </p>
-              )}
-            </div>
-
-            <Button type="submit" className="w-full" disabled={isLoading}>
-              {isLoading && <Spinner size="sm" className="mr-2" />}
-              Sign In
-            </Button>
-          </form>
-
-          <div className="mt-6 text-center text-sm text-muted-foreground">
-            <p>
-              Don't have a business account?{' '}
-              <Link to="/biz/apply" className="text-primary hover:underline font-medium">
-                Register here
-              </Link>
+        <div className="space-y-1.5">
+          <Label htmlFor="biz-password">Password</Label>
+          <Input
+            id="biz-password"
+            type="password"
+            placeholder="Enter your password"
+            {...form.register('password')}
+          />
+          {form.formState.errors.password && (
+            <p className="text-xs text-destructive">
+              {form.formState.errors.password.message}
             </p>
-            <p className="mt-2">
-              <Link to="/auth" className="text-muted-foreground hover:text-foreground">
-                Back to user login
-              </Link>
-            </p>
-          </div>
-        </CardContent>
-      </Card>
+          )}
+        </div>
+
+        <Button
+          type="submit"
+          className="w-full h-11 font-medium"
+          disabled={isLoading}
+        >
+          {isLoading && <Spinner size="sm" className="mr-2" />}
+          Sign In
+        </Button>
+      </form>
+
+      <div className="mt-6 text-center space-y-3">
+        <p className="text-muted-foreground text-sm">
+          Don't have a business account?{' '}
+          <button
+            type="button"
+            className="text-primary hover:underline font-medium"
+            onClick={(e) => {
+              e.stopPropagation()
+              onRegisterClick?.()
+            }}
+          >
+            Register here
+          </button>
+        </p>
+
+        {onUserLoginClick && (
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="text-muted-foreground hover:text-foreground"
+            onClick={onUserLoginClick}
+          >
+            <ArrowLeft className="h-4 w-4 mr-1" />
+            <span>Back to user login</span>
+          </Button>
+        )}
+      </div>
     </div>
   )
 }

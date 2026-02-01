@@ -4,24 +4,44 @@
 
 @layer base {
   :root {
-    --background: 222 47% 11%;
-    --foreground: 210 40% 98%;
-    --card: 222 47% 14%;
-    --card-foreground: 210 40% 98%;
-    --primary: 217 91% 60%;
-    --primary-foreground: 222 47% 11%;
-    --secondary: 217 33% 17%;
-    --secondary-foreground: 210 40% 98%;
-    --muted: 217 33% 17%;
-    --muted-foreground: 215 20% 65%;
-    --accent: 217 33% 17%;
-    --accent-foreground: 210 40% 98%;
-    --destructive: 0 84% 60%;
-    --destructive-foreground: 210 40% 98%;
-    --border: 217 33% 22%;
-    --input: 217 33% 22%;
-    --ring: 217 91% 60%;
+    --background: 0 0% 5%;
+    --foreground: 0 0% 100%;
+    --card: 0 0% 10%;
+    --card-foreground: 0 0% 100%;
+    --primary: 0 0% 100%;
+    --primary-foreground: 0 0% 0%;
+    --secondary: 0 0% 15%;
+    --secondary-foreground: 0 0% 100%;
+    --muted: 0 0% 15%;
+    --muted-foreground: 0 0% 55%;
+    --accent: 0 0% 20%;
+    --accent-foreground: 0 0% 100%;
+    --destructive: 0 70% 50%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 0 0% 15%;
+    --input: 0 0% 15%;
+    --ring: 0 0% 40%;
     --radius: 0.75rem;
+  }
+
+  .light {
+    --background: 0 0% 100%;
+    --foreground: 0 0% 5%;
+    --card: 0 0% 98%;
+    --card-foreground: 0 0% 5%;
+    --primary: 0 0% 5%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 0 0% 95%;
+    --secondary-foreground: 0 0% 20%;
+    --muted: 0 0% 95%;
+    --muted-foreground: 0 0% 45%;
+    --accent: 0 0% 95%;
+    --accent-foreground: 0 0% 10%;
+    --destructive: 0 70% 50%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 0 0% 90%;
+    --input: 0 0% 90%;
+    --ring: 0 0% 60%;
   }
 }
 
@@ -29,22 +49,92 @@
   * {
     @apply border-border;
   }
+  html {
+    overflow-x: hidden;
+    overscroll-behavior-x: none;
+  }
   body {
     @apply bg-background text-foreground;
     font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
     font-feature-settings: "rlig" 1, "calt" 1;
     margin: 0;
     min-height: 100vh;
+    min-height: 100svh;
+    overflow-x: hidden;
+    overscroll-behavior-x: none;
+    width: 100%;
+    max-width: 100vw;
   }
   #root {
     min-height: 100vh;
+    min-height: 100svh;
+    overflow-x: hidden;
+    width: 100%;
+    max-width: 100vw;
   }
+}
+
+@keyframes hero-shine {
+  0% {
+    transform: translateX(-120%) skewX(-15deg);
+  }
+  50% {
+    transform: translateX(10%) skewX(-15deg);
+  }
+  100% {
+    transform: translateX(120%) skewX(-15deg);
+  }
+}
+
+.hero-shine {
+  pointer-events: none;
+  position: absolute;
+  inset: -20%;
+  background: linear-gradient(
+    120deg,
+    transparent 0%,
+    rgba(255, 255, 255, 0.18) 20%,
+    rgba(255, 255, 255, 0.03) 45%,
+    transparent 70%
+  );
+  opacity: 0;
+  animation: hero-shine 1.6s linear infinite;
+  animation-play-state: paused;
+}
+
+.hero-shine-wrapper:hover .hero-shine,
+.hero-shine-wrapper:active .hero-shine {
+  opacity: 0.9;
+  animation-play-state: running;
+}
+
+.hero-shine-wrapper .hero-shine:nth-child(3) {
+  animation-delay: 0.1s;
+}
+
+.hero-shine-wrapper .hero-shine:nth-child(4) {
+  animation-delay: 0.5s;
+}
+
+.hero-shine-wrapper .hero-shine:nth-child(5) {
+  animation-delay: 0.9s;
+}
+
+.hero-shine-wrapper .hero-shine:nth-child(6) {
+  animation-delay: 1.3s;
 }
 
 /* Custom scrollbar for dark theme */
 ::-webkit-scrollbar {
   width: 8px;
   height: 8px;
+}
+
+/* Global container max-width override */
+@media (min-width: 1100px) {
+  .container {
+    max-width: 1100px !important;
+  }
 }
 
 ::-webkit-scrollbar-track {
@@ -58,4 +148,15 @@
 
 ::-webkit-scrollbar-thumb:hover {
   background: hsl(var(--muted-foreground));
+}
+
+@layer utilities {
+  .scrollbar-hide {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+
+  .scrollbar-hide::-webkit-scrollbar {
+    display: none;
+  }
 }

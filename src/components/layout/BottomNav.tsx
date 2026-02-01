@@ -1,20 +1,28 @@
-import { Link, useLocation } from 'react-router-dom'
+import { useState } from 'react'
+import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '@/store/auth'
 import {
   Car,
-  Heart,
   MessageCircle,
   User,
   PlusCircle,
   LogIn,
-  LayoutDashboard
+  LayoutDashboard,
+  Home
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { Dialog, DialogContent } from '@/components/ui/dialog'
+import { UserSell } from '@/pages/user/UserSell'
+import { DealerSell } from '@/pages/business/dealer/DealerSell'
 
 export function BottomNav() {
   const { pathname } = useLocation()
-  const { isAuthenticated, user } = useAuth()
+  const navigate = useNavigate()
+  const { isAuthenticated, user, openAuthModal } = useAuth()
   const isBusiness = user?.role_id && user.role_id >= 2
+  const isDealer = user?.role_id === 2
+  const [isUserSellOpen, setIsUserSellOpen] = useState(false)
+  const [isDealerSellOpen, setIsDealerSellOpen] = useState(false)
 
   const getDashboardUrl = () => {
     if (!user?.role_id) return '/biz/dealer/garage'
@@ -60,69 +68,129 @@ export function BottomNav() {
     }
   }
 
-  const isActive = (path: string) => pathname === path
+  const isActive = (path: string) => pathname.startsWith(path)
 
-  const navItems = isBusiness ? [
-    {
-      label: getDashboardLabel(),
-      icon: LayoutDashboard,
-      path: getDashboardUrl(),
-      authRequired: true,
-    },
-    {
+  const canCreateCar = isAuthenticated && (!user?.role_id || user.role_id === 1 || user.role_id === 2)
+
+  const handlePrimaryClick = (path: string, label: string) => {
+    if (label === 'Sell' && canCreateCar) {
+      if (isDealer) {
+        setIsDealerSellOpen(true)
+      } else {
+        setIsUserSellOpen(true)
+      }
+      return
+    }
+
+    navigate(path)
+  }
+
+  const getNavItems = () => {
+    // Base items for everyone
+    const homeItem = {
+      label: 'Home',
+      icon: Home,
+      path: '/',
+      authRequired: false,
+      primary: false,
+    }
+
+    const catalog = {
       label: 'Catalog',
       icon: Car,
-      path: '/',
-    },
-    {
-      label: getActionLabel(),
-      icon: PlusCircle,
-      path: getActionUrl(),
-      primary: true,
-    },
-    {
+      path: '/cars',
+      authRequired: false,
+      primary: false,
+    }
+    const messages = {
       label: 'Messages',
       icon: MessageCircle,
       path: '/messages',
       authRequired: true,
-    },
-    {
-      label: 'Profile',
-      icon: User,
-      path: '/biz/profile',
-      authRequired: true,
-    },
-  ] : [
-    {
-      label: 'Catalog',
-      icon: Car,
-      path: '/',
-    },
-    {
-      label: 'Favorites',
-      icon: Heart,
-      path: '/favorites',
-      authRequired: true,
-    },
-    {
-      label: 'Sell',
-      icon: PlusCircle,
-      path: '/sell',
-      primary: true,
-    },
-    {
-      label: 'Messages',
-      icon: MessageCircle,
-      path: '/messages',
-      authRequired: true,
-    },
-    {
-      label: 'Profile',
-      icon: User,
-      path: '/profile',
-      authRequired: true,
-    },
-  ]
+      primary: false,
+    }
+    
+    // Non-business user items
+    if (!isBusiness) {
+      const sellItem = {
+        label: 'Sell',
+        icon: PlusCircle,
+        path: '/sell',
+        primary: true,
+        authRequired: true,
+      }
+
+      return [
+        homeItem,
+        catalog,
+
+        ...(canCreateCar ? [sellItem] : []),
+        messages,
+        {
+          label: 'Profile',
+          icon: User,
+          path: '/profile',
+          authRequired: true,
+          primary: false,
+        },
+      ]
+    }
+
+    // Logist items (Role 3) - No dashboard, no add route
+    if (user?.role_id === 3) {
+      return [
+        homeItem,
+        catalog,
+        messages,
+        {
+          label: 'Profile',
+          icon: User,
+          path: '/biz/profile',
+          authRequired: true,
+          primary: false,
+        },
+      ]
+    }
+
+    // Other business roles (Dealer, Broker, Service)
+    const baseItems = [
+      homeItem,
+      {
+        label: getDashboardLabel(),
+        icon: LayoutDashboard,
+        path: getDashboardUrl(),
+        authRequired: true,
+        primary: false,
+      },
+      catalog,
+      messages,
+      {
+        label: 'Profile',
+        icon: User,
+        path: '/biz/profile',
+        authRequired: true,
+        primary: false,
+      },
+    ]
+
+    if (user?.role_id === 2 && canCreateCar) {
+      const sellItem = {
+        label: getActionLabel(),
+        icon: PlusCircle,
+        path: getActionUrl(),
+        primary: true,
+        authRequired: true,
+      }
+      // Dealer items: Home, Dashboard, Sell, Messages, Profile (5 items)
+      // baseItems = [Home, Dashboard, Catalog, Messages, Profile]
+      // We drop Catalog in favor of Messages for the limited space
+      return [homeItem, baseItems[1], sellItem, baseItems[3], baseItems[4]]
+    }
+
+    return baseItems
+  }
+
+  const navItems = getNavItems()
 
   return (
     <div className="md:hidden fixed bottom-0 left-0 right-0 z-50 bg-background/80 backdrop-blur-lg border-t border-border pb-[env(safe-area-inset-bottom)]">
@@ -131,19 +199,15 @@ export function BottomNav() {
           if (item.authRequired && !isAuthenticated) {
             if (item.label === 'Profile') {
               return (
-                <Link
+                <button
                   key="auth"
-                  to="/auth"
-                  className={cn(
-                    "flex flex-col items-center justify-center w-full h-full gap-1 text-xs font-medium transition-colors",
-                    isActive('/auth') 
-                      ? "text-primary" 
-                      : "text-muted-foreground hover:text-foreground"
-                  )}
+                  type="button"
+                  onClick={openAuthModal}
+                  className="flex flex-col items-center justify-center w-full h-full gap-1 text-xs font-medium transition-colors text-muted-foreground hover:text-foreground"
                 >
                   <LogIn className="h-6 w-6" />
                   <span>Sign In</span>
-                </Link>
+                </button>
               )
             }
             return null
@@ -151,23 +215,22 @@ export function BottomNav() {
 
           if (item.primary) {
             return (
-              <Link
+              <button
                 key={item.path}
-                to={item.path}
+                type="button"
+                onClick={() => handlePrimaryClick(item.path, item.label)}
                 className="flex flex-col items-center justify-center -mt-6"
               >
                 <div className={cn(
-                  "flex items-center justify-center w-14 h-14 rounded-full shadow-lg transition-transform active:scale-95",
-                  isActive(item.path)
-                    ? "bg-primary text-primary-foreground"
-                    : "bg-primary text-primary-foreground"
+                  "flex items-center justify-center w-12 h-12 rounded-2xl shadow-lg transition-transform active:scale-95",
+                  "bg-primary text-primary-foreground"
                 )}>
                   <item.icon className="h-7 w-7" />
                 </div>
                 <span className="text-xs font-medium mt-1 text-foreground">
                   {item.label}
                 </span>
-              </Link>
+              </button>
             )
           }
 
@@ -188,6 +251,18 @@ export function BottomNav() {
           )
         })}
       </nav>
+
+      <Dialog open={isUserSellOpen} onOpenChange={setIsUserSellOpen}>
+        <DialogContent fullScreen>
+          <UserSell />
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={isDealerSellOpen} onOpenChange={setIsDealerSellOpen}>
+        <DialogContent fullScreen>
+          <DealerSell />
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

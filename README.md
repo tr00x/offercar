@@ -1,105 +1,62 @@
-# 🚗 Mashyn Bazar
+# OfferCar (Mashyn Bazar)
 
-**Mashyn Bazar** — это современная и мощная платформа для автомобильного рынка, объединяющая частных продавцов, дилеров и сервисные центры в единую экосистему.
+A modern, high-performance car marketplace platform built with React and TypeScript. OfferCar connects buyers and sellers with an intuitive interface, real-time communication, and comprehensive vehicle management tools.
 
-![Project Status](https://img.shields.io/badge/status-active-success.svg)
-![License](https://img.shields.io/badge/license-MIT-blue.svg)
-![React](https://img.shields.io/badge/react-19.2.0-61dafb.svg?style=flat&logo=react)
-![TypeScript](https://img.shields.io/badge/typescript-5.9-blue.svg?style=flat&logo=typescript)
+## 🚀 Features
 
----
+-   **Advanced Search & Filtering**: Deep filtering capabilities by brand, model, generation, price, year, and more.
+-   **Real-time Chat**: Integrated WebSocket-based messaging system for instant communication between buyers and sellers.
+-   **Role-Based Access**: Specialized dashboards for regular Users, Dealers, Brokers, and Logistics providers.
+-   **Responsive Design**: Fully responsive UI built with Tailwind CSS, optimized for mobile and desktop.
+-   **Secure Authentication**: Robust JWT-based authentication with automatic token refreshing.
+-   **Media Management**: Optimized image handling for vehicle listings and user profiles.
+-   **Dark/Light Mode**: Built-in theme switching support.
+-   **Localization**: Multi-language support structure (English, Russian, Turkmen).
 
-## ✨ Особенности
+## 🛠️ Tech Stack
 
-### 👤 Для пользователей
-- **Умный поиск**: Фильтрация по брендам, моделям, годам и другим параметрам.
-- **Продажа авто**: Удобный флоу создания объявлений с загрузкой фото и видео.
-- **Избранное**: Сохраняйте интересные авто, данные обновляются мгновенно (Optimistic UI).
-- **Чат**: Встроенный мессенджер для общения с продавцами.
-- **Шеринг**: Продвинутая система шеринга через нативные API устройства и соцсети.
+-   **Core**: [React 18](https://react.dev/), [TypeScript](https://www.typescriptlang.org/), [Vite](https://vitejs.dev/)
+-   **Styling**: [Tailwind CSS](https://tailwindcss.com/), [Shadcn UI](https://ui.shadcn.com/) (Radix UI), [Lucide React](https://lucide.dev/)
+-   **State & Data Fetching**: [TanStack Query](https://tanstack.com/query/latest), [React Context API](https://react.dev/reference/react/createContext)
+-   **Routing**: [React Router v6](https://reactrouter.com/en/main)
+-   **Forms & Validation**: [React Hook Form](https://react-hook-form.com/), [Zod](https://zod.dev/)
+-   **Networking**: [Axios](https://axios-http.com/), Native WebSockets
 
-### 🏢 Для бизнеса
-Платформа предоставляет специализированные кабинеты для разных ролей:
-- **Dealer**: Управление автопарком, статусы продаж, аналитика.
-- **Broker**: Инструменты для подбора и перепродажи.
-- **Logistic**: Управление маршрутами и доставкой.
-- **Service**: Запись на обслуживание и управление расписанием.
+## 📦 Installation
 
----
+1.  **Clone the repository**
 
-## 🛠 Технологический стек
+    ```bash
+    git clone https://github.com/tr00x/offercar.git
+    cd offercar
+    ```
 
-Проект построен на передовых технологиях для обеспечения максимальной производительности и UX:
+2.  **Install dependencies**
 
-- **Core**: [React 19](https://react.dev/), [Vite](https://vitejs.dev/)
-- **Language**: [TypeScript](https://www.typescriptlang.org/)
-- **State & Async**: [TanStack Query (React Query)](https://tanstack.com/query) — для кэширования и оптимистичных обновлений.
-- **Styling**: [Tailwind CSS](https://tailwindcss.com/) — для стилизации.
-- **UI Components**: [Shadcn UI](https://ui.shadcn.com/) + [Radix UI](https://www.radix-ui.com/) — доступные и красивые компоненты.
-- **Icons**: [Lucide React](https://lucide.dev/)
-- **Forms**: [React Hook Form](https://react-hook-form.com/) + [Zod](https://zod.dev/) — валидация.
-- **Routing**: [React Router v7](https://reactrouter.com/)
+    ```bash
+    npm install
+    ```
 
----
+3.  **Run development server**
 
-## 🚀 Запуск проекта
+    ```bash
+    npm run dev
+    ```
 
-### Предварительные требования
-- Node.js (версия 18+)
-- npm или yarn
+    The application will start at `http://localhost:5173`.
 
-### Установка
+## 🏗️ Build
 
-1. **Клонируйте репозиторий:**
-   ```bash
-   git clone https://github.com/tr00x/da-web.git
-   cd da-web/mashyn-bazar
-   ```
+To create a production build:
 
-2. **Установите зависимости:**
-   ```bash
-   npm install
-   ```
-
-3. **Запустите локальный сервер:**
-   ```bash
-   npm run dev
-   ```
-
-Приложение будет доступно по адресу `http://localhost:5173`.
-
----
-
-## 📂 Структура проекта
-
-```
-src/
-├── api/            # API клиенты и сервисы
-├── components/     # Переиспользуемые UI компоненты
-│   ├── cars/       # Компоненты карточек и фильтров авто
-│   ├── layout/     # Хедер, футер, навигация
-│   └── ui/         # Базовые UI элементы (Shadcn)
-├── hooks/          # Кастомные хуки (useFavorites и др.)
-├── pages/          # Страницы приложения
-│   ├── business/   # Страницы бизнес-кабинетов
-│   └── user/       # Страницы пользователя
-├── store/          # Глобальный стейт (Auth context)
-├── types/          # TypeScript типы
-└── lib/            # Утилиты и хелперы
+```bash
+npm run build
 ```
 
----
+## 🤝 Contributing
 
-## 🤝 Вклад в проект (Contributing)
+Contributions are welcome! Please feel free to submit a Pull Request.
 
-Мы приветствуем любой вклад! Если у вас есть идеи по улучшению:
+## 📄 License
 
-1. Форкните репозиторий.
-2. Создайте ветку для вашей фичи (`git checkout -b feature/AmazingFeature`).
-3. Закоммитьте изменения (`git commit -m 'Add some AmazingFeature'`).
-4. Запушьте ветку (`git push origin feature/AmazingFeature`).
-5. Откройте Pull Request.
-
----
-
-Designed & Developed with ❤️ for car enthusiasts.
+This project is licensed under the MIT License.

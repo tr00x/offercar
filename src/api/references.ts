@@ -22,10 +22,18 @@ export async function getBrands(): Promise<Brand[]> {
   return response.data
 }
 
-export async function getFilterBrands(): Promise<Brand[]> {
+export interface FilterBrand extends Brand {
+  model_count?: number
+}
+
+export interface FilterBrandsResponse {
+  popular_brands: FilterBrand[]
+  all_brands: FilterBrand[]
+}
+
+export async function getFilterBrands(): Promise<FilterBrandsResponse> {
   const response = await apiClient.get('/api/v1/users/filter-brands')
-  // API returns { popular_brands: [...] }
-  return response.data.popular_brands || response.data || []
+  return response.data as FilterBrandsResponse
 }
 
 // Models
@@ -48,12 +56,12 @@ export async function getGenerationsByModel(
   bodyTypeId: number,
   wheel?: boolean
 ): Promise<Generation[]> {
-  const params: any = {
+  const params: Record<string, string> = {
     year: String(year),
     body_type_id: String(bodyTypeId),
   }
   if (wheel !== undefined) {
-    params.wheel = String(wheel)
+    params.wheel = wheel ? '1' : '0'
   }
   const response = await apiClient.get(`/api/v1/users/brands/${brandId}/models/${modelId}/generations`, {
     params,
@@ -81,9 +89,9 @@ export async function getGenerationsFromModels(modelIds: number[]): Promise<Gene
 
 // Years available for model
 export async function getYearsForModel(brandId: number, modelId: number, wheel?: boolean): Promise<number[]> {
-  const params: any = {}
+  const params: Record<string, string> = {}
   if (wheel !== undefined) {
-    params.wheel = String(wheel)
+    params.wheel = wheel ? '1' : '0'
   }
   const response = await apiClient.get(`/api/v1/users/brands/${brandId}/models/${modelId}/years`, {
     params,
@@ -98,11 +106,11 @@ export async function getBodyTypesForModel(
   year: number,
   wheel?: boolean
 ): Promise<BodyType[]> {
-  const params: any = {
+  const params: Record<string, string> = {
     year: String(year),
   }
   if (wheel !== undefined) {
-    params.wheel = String(wheel)
+    params.wheel = wheel ? '1' : '0'
   }
   const response = await apiClient.get(`/api/v1/users/brands/${brandId}/models/${modelId}/body-types`, {
     params,
