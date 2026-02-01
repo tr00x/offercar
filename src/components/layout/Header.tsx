@@ -17,7 +17,7 @@ import {
   DropdownMenuSubTrigger,
 } from '@/components/ui/dropdown-menu'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
-import { User, LogOut, Plus, Settings, LayoutDashboard, ChevronDown, Ship, Wrench, Briefcase, Store, Sun, Moon, MessageCircle, Globe, Palette } from 'lucide-react'
+import { User, LogOut, Plus, LayoutDashboard, ChevronDown, Ship, Wrench, Briefcase, Store, MessageCircle, Globe, Palette, Moon, Sun } from 'lucide-react'
 import { Dialog, DialogTrigger, DialogContent } from '@/components/ui/dialog'
 import { AuthCard } from '@/pages/Auth'
 import { BusinessLoginCard } from '@/pages/business/Login'

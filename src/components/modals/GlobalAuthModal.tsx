@@ -39,7 +39,10 @@ export function GlobalAuthModal() {
             onRegisterClick={() => {
               closeAuthModal()
               setIsBusinessLoginOpen(false)
-              navigate('/biz/apply')
+              // Delay navigation to ensure modal is fully closed
+              setTimeout(() => {
+                navigate('/biz/apply')
+              }, 100)
             }}
             onSuccess={closeAuthModal}
           />

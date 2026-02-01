@@ -68,6 +68,9 @@ export function AuthCard({
   businessLoginAsButton,
   onBusinessLoginClick
 }: AuthCardProps) {
+  // Silence unused variable warnings for props that might be used in future or alternate layouts
+  void hideBusinessRegisterLink
+  void businessLoginAsButton
   const navigate = useNavigate()
   const location = useLocation()
   const { login } = useAuth()
