@@ -635,7 +635,7 @@ export function BusinessProfile() {
 
                       <div className="space-y-2">
                         <Label htmlFor="phone">Phone</Label>
-                        <Input id="phone" {...form.register('phone')} placeholder="e.g. +99361234567" />
+                        <Input id="phone" {...form.register('phone')} />
                         <p className="text-xs text-muted-foreground">Main phone number for this account.</p>
                       </div>
 
@@ -651,7 +651,6 @@ export function BusinessProfile() {
                         <Select
                           id="city_id"
                           options={cities?.map(c => ({ value: c.id, label: c.name })) || []}
-                          placeholder="Select City"
                           {...form.register('city_id')}
                         />
                       </div>
@@ -663,7 +662,6 @@ export function BusinessProfile() {
                           type="number"
                           step="any"
                           {...form.register('latitude')}
-                          placeholder="e.g. 25.2048"
                         />
                         <p className="text-xs text-muted-foreground">GPS Latitude coordinate.</p>
                       </div>
@@ -675,7 +673,6 @@ export function BusinessProfile() {
                           type="number"
                           step="any"
                           {...form.register('longitude')}
-                          placeholder="e.g. 55.2708"
                         />
                         <p className="text-xs text-muted-foreground">GPS Longitude coordinate.</p>
                       </div>
@@ -688,7 +685,6 @@ export function BusinessProfile() {
                         id="about_us" 
                         {...form.register('about_us')} 
                         className="min-h-[100px]"
-                        placeholder="Tell customers about your company..."
                       />
                       <p className="text-xs text-muted-foreground">Short description about your company or services.</p>
                     </div>
@@ -773,7 +769,6 @@ export function BusinessProfile() {
                               id="contact-value" 
                               value={newContactValue} 
                               onChange={(e) => setNewContactValue(e.target.value)} 
-                              placeholder="Link or username"
                               className="h-9"
                             />
                           </div>
@@ -857,7 +852,6 @@ export function BusinessProfile() {
                                   options={countries?.map(c => ({ value: c.id, label: c.name })) || []}
                                   value={fromCountryId}
                                   onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setFromCountryId(e.target.value)}
-                                  placeholder="Select country"
                                 />
                               </div>
                               <div className="space-y-2">
@@ -866,7 +860,6 @@ export function BusinessProfile() {
                                   options={countries?.map(c => ({ value: c.id, label: c.name })) || []}
                                   value={toCountryId}
                                   onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setToCountryId(e.target.value)}
-                                  placeholder="Select country"
                                 />
                               </div>
                             </div>

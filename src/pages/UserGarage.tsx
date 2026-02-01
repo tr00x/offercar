@@ -283,7 +283,7 @@ export function UserGarage() {
       {/* User Sell Modal */}
       <Dialog open={isUserSellOpen} onOpenChange={setIsUserSellOpen}>
         <DialogContent fullScreen>
-          <UserSell editId={activeEditId} />
+          <UserSell editId={activeEditId} onSuccess={() => setIsUserSellOpen(false)} />
         </DialogContent>
       </Dialog>
     </div>

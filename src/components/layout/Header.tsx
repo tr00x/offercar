@@ -362,14 +362,14 @@ export function Header() {
       {/* User Sell Modal */}
       <Dialog open={isUserSellOpen} onOpenChange={setIsUserSellOpen}>
         <DialogContent fullScreen>
-          <UserSell />
+          <UserSell onSuccess={() => setIsUserSellOpen(false)} />
         </DialogContent>
       </Dialog>
 
       {/* Dealer Sell Modal */}
       <Dialog open={isDealerSellOpen} onOpenChange={setIsDealerSellOpen}>
         <DialogContent fullScreen>
-          <DealerSell />
+          <DealerSell onSuccess={() => setIsDealerSellOpen(false)} />
         </DialogContent>
       </Dialog>
 

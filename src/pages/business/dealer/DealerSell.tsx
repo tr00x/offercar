@@ -383,7 +383,12 @@ export function DealerSell(props: DealerSellProps = {}) {
       }
       queryClient.invalidateQueries({ queryKey: ['dealer-cars-drafts'] })
       queryClient.invalidateQueries({ queryKey: ['dealer-cars-active'] })
-      navigate('/biz/dealer/garage')
+
+      if (props.onSuccess) {
+        props.onSuccess()
+      } else {
+        navigate('/biz/dealer/garage')
+      }
     },
     onError: (error: unknown) => {
       console.error('Create car error:', error)
@@ -397,7 +402,6 @@ export function DealerSell(props: DealerSellProps = {}) {
   const updateMutation = useMutation({
     mutationFn: updateDealerCar,
     onSuccess: async (_, variables) => {
-      props.onSuccess?.()
       toast.success('Car listing updated successfully!')
       if (images.length > 0) {
         try {
@@ -410,7 +414,12 @@ export function DealerSell(props: DealerSellProps = {}) {
       }
       queryClient.invalidateQueries({ queryKey: ['dealer-cars-drafts'] })
       queryClient.invalidateQueries({ queryKey: ['dealer-cars-active'] })
-      navigate('/biz/dealer/garage')
+
+      if (props.onSuccess) {
+        props.onSuccess()
+      } else {
+        navigate('/biz/dealer/garage')
+      }
     },
     onError: (error: unknown) => {
       console.error('Update car error:', error)
@@ -678,8 +687,6 @@ export function DealerSell(props: DealerSellProps = {}) {
                   <Label>Brand *</Label>
                   <Combobox
                     options={brands.map((b) => ({ value: b.id, label: b.name, image: getImageUrl(b.logo) }))}
-                    placeholder="Select brand"
-                    searchPlaceholder="Search brand..."
                     value={brandId}
                     onChange={(val) => form.setValue('brand_id', Number(val), { shouldDirty: true })}
                   />
@@ -692,8 +699,6 @@ export function DealerSell(props: DealerSellProps = {}) {
                   <Label>Model *</Label>
                   <Combobox
                     options={models.map((m) => ({ value: m.id, label: m.name }))}
-                    placeholder="Select model"
-                    searchPlaceholder="Search model..."
                     value={modelId}
                     onChange={(val) => form.setValue('model_id', Number(val), { shouldDirty: true })}
                     disabled={!brandId}
@@ -707,8 +712,6 @@ export function DealerSell(props: DealerSellProps = {}) {
                   <Label>Year *</Label>
                   <Combobox
                     options={years.map((y) => ({ value: y, label: String(y) }))}
-                    placeholder="Select year"
-                    searchPlaceholder="Search year..."
                     value={year}
                     onChange={(val) => form.setValue('year', Number(val), { shouldDirty: true })}
                     disabled={!modelId}
@@ -746,8 +749,6 @@ export function DealerSell(props: DealerSellProps = {}) {
                   <Label>Body Type *</Label>
                    <Combobox
                         options={bodyTypes.map((bt) => ({ value: bt.id, label: bt.name }))}
-                        placeholder="Select body type"
-                        searchPlaceholder="Search..."
                         value={bodyTypeId}
                         onChange={(val) => form.setValue('body_type_id', Number(val), { shouldDirty: true })}
                         disabled={!year}
@@ -761,8 +762,6 @@ export function DealerSell(props: DealerSellProps = {}) {
                   <Label>Generation *</Label>
                    <Combobox
                         options={uniqueGenerationOptions}
-                        placeholder="Select generation"
-                        searchPlaceholder="Search generation..."
                         value={selectedGenerationName} 
                         onChange={(val) => handleGenerationChange(String(val))} 
                         disabled={!bodyTypeId}
@@ -813,8 +812,6 @@ export function DealerSell(props: DealerSellProps = {}) {
                      <Label>City *</Label>
                      <Combobox
                         options={cities.map((c) => ({ value: c.id, label: c.name }))}
-                        placeholder="Select city"
-                        searchPlaceholder="Search city..."
                         value={cityId}
                         onChange={(val) => form.setValue('city_id', Number(val), { shouldDirty: true })}
                      />
@@ -827,8 +824,6 @@ export function DealerSell(props: DealerSellProps = {}) {
                      <Label>Color *</Label>
                      <Combobox
                         options={colors.map((c) => ({ value: c.id, label: c.name }))}
-                        placeholder="Select color"
-                        searchPlaceholder="Search color..."
                         value={colorId}
                         onChange={(val) => form.setValue('color_id', Number(val), { shouldDirty: true })}
                      />
@@ -841,7 +836,6 @@ export function DealerSell(props: DealerSellProps = {}) {
                      <Label>Mileage (km) *</Label>
                      <Input
                         type="number"
-                        placeholder="e.g. 50000"
                         {...form.register('odometer', { valueAsNumber: true })}
                      />
                      {form.formState.errors.odometer && (
@@ -853,7 +847,6 @@ export function DealerSell(props: DealerSellProps = {}) {
                      <Label>Price (USD) *</Label>
                      <Input
                         type="number"
-                        placeholder="e.g. 15000"
                         {...form.register('price', { valueAsNumber: true })}
                      />
                      {form.formState.errors.price && (
@@ -865,7 +858,6 @@ export function DealerSell(props: DealerSellProps = {}) {
               <div className="space-y-2">
                  <Label>VIN Code</Label>
                  <Input
-                    placeholder="Enter VIN code"
                     {...form.register('vin_code')}
                     className="uppercase"
                     maxLength={17}
@@ -887,7 +879,6 @@ export function DealerSell(props: DealerSellProps = {}) {
                       { value: 'new', label: 'New' },
                       { value: 'used', label: 'Used' },
                     ]}
-                    placeholder="Select condition"
                     value={isNew ? 'new' : 'used'}
                     onChange={(val) => form.setValue('new', String(val) === 'new', { shouldDirty: true })}
                   />
@@ -899,7 +890,6 @@ export function DealerSell(props: DealerSellProps = {}) {
                       { value: 'no', label: 'No' },
                       { value: 'yes', label: 'Yes' },
                     ]}
-                    placeholder="Accident history"
                     value={isCrash ? 'yes' : 'no'}
                     onChange={(val) => form.setValue('crash', String(val) === 'yes', { shouldDirty: true })}
                   />
@@ -915,7 +905,6 @@ export function DealerSell(props: DealerSellProps = {}) {
                       { value: 4, label: 'Cheaper' },
                       { value: 5, label: 'Not a car' },
                     ]}
-                    placeholder="Trade-in option"
                     value={tradeIn}
                     onChange={(val) => form.setValue('trade_in', Number(val), { shouldDirty: true })}
                   />
@@ -926,7 +915,6 @@ export function DealerSell(props: DealerSellProps = {}) {
                  <Label>Description</Label>
                  <textarea
                     className="flex min-h-[80px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
-                    placeholder="Tell us more about your car..."
                      rows={5}
                      {...form.register('description')}
                   />
@@ -950,7 +938,6 @@ export function DealerSell(props: DealerSellProps = {}) {
                          <Input
                             value={phone}
                             onChange={(e) => updatePhoneNumber(index, e.target.value)}
-                            placeholder="+993 6X XX XX XX"
                          />
                          {phoneNumbers.length > 1 && (
                             <Button

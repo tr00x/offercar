@@ -254,13 +254,13 @@ export function BottomNav() {
 
       <Dialog open={isUserSellOpen} onOpenChange={setIsUserSellOpen}>
         <DialogContent fullScreen>
-          <UserSell />
+          <UserSell onSuccess={() => setIsUserSellOpen(false)} />
         </DialogContent>
       </Dialog>
 
       <Dialog open={isDealerSellOpen} onOpenChange={setIsDealerSellOpen}>
         <DialogContent fullScreen>
-          <DealerSell />
+          <DealerSell onSuccess={() => setIsDealerSellOpen(false)} />
         </DialogContent>
       </Dialog>
     </div>

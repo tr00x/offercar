@@ -52,6 +52,7 @@ type SellFormData = z.infer<typeof sellSchema>
 
 type UserSellProps = {
   editId?: string | null
+  onSuccess?: () => void
 }
 
 export function UserSell(props: UserSellProps = {}) {
@@ -451,7 +452,12 @@ export function UserSell(props: UserSellProps = {}) {
       queryClient.invalidateQueries({ queryKey: ['my-cars'] })
       queryClient.invalidateQueries({ queryKey: ['my-cars-on-sale'] })
       queryClient.invalidateQueries({ queryKey: ['liked-cars'] })
-      navigate(`/cars/${result.id}`)
+
+      if (props.onSuccess) {
+        props.onSuccess()
+      } else {
+        navigate(`/cars/${result.id}`)
+      }
     },
     onError: (error: unknown) => {
       console.error('Create car error:', error)
@@ -515,7 +521,7 @@ export function UserSell(props: UserSellProps = {}) {
       if (!hasErrors) {
         toast.success('Car listing updated successfully!')
       }
-      
+
       setLoadingMessage(null)
       setPendingDeleteImages([])
       queryClient.invalidateQueries({ queryKey: ['cars'] })
@@ -523,7 +529,12 @@ export function UserSell(props: UserSellProps = {}) {
       queryClient.invalidateQueries({ queryKey: ['my-cars'] })
       queryClient.invalidateQueries({ queryKey: ['my-cars-on-sale'] })
       queryClient.invalidateQueries({ queryKey: ['liked-cars'] })
-      navigate(`/cars/${variables.id}`)
+
+      if (props.onSuccess) {
+        props.onSuccess()
+      } else {
+        navigate(`/cars/${variables.id}`)
+      }
     },
     onError: (error: unknown) => {
       console.error('Update car error:', error)
@@ -737,9 +748,8 @@ export function UserSell(props: UserSellProps = {}) {
         <div className="grid grid-cols-1 md:grid-cols-[200px_1fr] gap-4 items-center">
           <Label className="text-muted-foreground">VIN or body number <span className="text-red-500">*</span></Label>
           <div className="relative">
-            <Input 
-              {...form.register('vin_code')} 
-              placeholder="1MBG..." 
+            <Input
+              {...form.register('vin_code')}
               className="bg-background border-input text-foreground placeholder:text-muted-foreground focus-visible:ring-1 focus-visible:ring-ring"
             />
             {form.formState.errors.vin_code && (
@@ -755,7 +765,6 @@ export function UserSell(props: UserSellProps = {}) {
             options={brands.map(b => ({ value: b.id, label: b.name }))}
             value={brandId}
             onChange={(val: string | number) => form.setValue('brand_id', val as number, { shouldDirty: true })}
-            placeholder="Select brand"
             className="w-full"
             triggerClassName="bg-background border-input text-foreground hover:bg-accent hover:text-accent-foreground focus:ring-1 focus:ring-ring"
           />
@@ -768,7 +777,6 @@ export function UserSell(props: UserSellProps = {}) {
             options={models.map(m => ({ value: m.id, label: m.name }))}
             value={modelId}
             onChange={(val: string | number) => form.setValue('model_id', val as number, { shouldDirty: true })}
-            placeholder="Select model"
             disabled={!brandId}
             className="w-full"
             triggerClassName="bg-background border-input text-foreground hover:bg-accent hover:text-accent-foreground focus:ring-1 focus:ring-ring"
@@ -803,7 +811,6 @@ export function UserSell(props: UserSellProps = {}) {
             options={years.map(y => ({ value: y, label: y.toString() }))}
             value={year}
             onChange={(val: string | number) => form.setValue('year', val as number, { shouldDirty: true })}
-            placeholder="Select year"
             disabled={!modelId}
             className="w-full"
             triggerClassName="bg-background border-input text-foreground hover:bg-accent hover:text-accent-foreground focus:ring-1 focus:ring-ring"
@@ -1004,7 +1011,6 @@ export function UserSell(props: UserSellProps = {}) {
             options={colors.map(c => ({ value: c.id, label: c.name }))}
             value={colorId}
             onChange={(val: string | number) => form.setValue('color_id', val as number)}
-            placeholder="Select color"
             className="w-full"
             triggerClassName="bg-background border-input text-foreground hover:bg-accent hover:text-accent-foreground focus:ring-1 focus:ring-ring"
           />
@@ -1048,7 +1054,6 @@ export function UserSell(props: UserSellProps = {}) {
               options={TRADE_IN_OPTIONS}
               value={tradeIn}
               onChange={(val: string | number) => form.setValue('trade_in', val as number)}
-              placeholder="Select trade-in option"
               className="w-full"
               triggerClassName="bg-background border-input text-foreground hover:bg-accent hover:text-accent-foreground focus:ring-1 focus:ring-ring"
            />
@@ -1064,7 +1069,6 @@ export function UserSell(props: UserSellProps = {}) {
             options={cities.map(c => ({ value: c.id, label: c.name }))}
             value={cityId}
             onChange={(val: string | number) => form.setValue('city_id', val as number)}
-            placeholder="Select city"
             className="w-full"
             triggerClassName="bg-background border-input text-foreground hover:bg-accent hover:text-accent-foreground focus:ring-1 focus:ring-ring"
           />
@@ -1079,7 +1083,6 @@ export function UserSell(props: UserSellProps = {}) {
                 <Input
                   value={phone}
                   onChange={(e) => updatePhoneNumber(index, e.target.value)}
-                  placeholder="+993..."
                   className="bg-background border-input text-foreground focus-visible:ring-1 focus-visible:ring-ring"
                 />
                 {phoneNumbers.length > 1 && (
@@ -1115,7 +1118,6 @@ export function UserSell(props: UserSellProps = {}) {
           <Label className="text-muted-foreground pt-3">Description</Label>
           <Textarea
             {...form.register('description')}
-            placeholder="Describe car condition, configuration, extra options..."
             className="min-h-[150px] bg-background border-input text-foreground placeholder:text-muted-foreground resize-y focus-visible:ring-1 focus-visible:ring-ring"
           />
         </div>

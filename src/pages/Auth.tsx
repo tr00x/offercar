@@ -57,20 +57,13 @@ const phoneCountries: PhoneCountry[] = [
 
 type AuthCardProps = {
   onSuccess?: () => void
-  hideBusinessRegisterLink?: boolean
-  businessLoginAsButton?: boolean
   onBusinessLoginClick?: () => void
 }
 
 export function AuthCard({
   onSuccess,
-  hideBusinessRegisterLink,
-  businessLoginAsButton,
   onBusinessLoginClick
 }: AuthCardProps) {
-  // Silence unused variable warnings for props that might be used in future or alternate layouts
-  void hideBusinessRegisterLink
-  void businessLoginAsButton
   const navigate = useNavigate()
   const location = useLocation()
   const { login } = useAuth()
@@ -427,7 +420,6 @@ export function AuthCard({
                       handleSendCode()
                     }
                   }}
-                  placeholder="62 71 13 10"
                   className="flex-1 bg-transparent text-foreground placeholder:text-muted-foreground outline-none"
                   autoFocus
                 />
@@ -450,7 +442,6 @@ export function AuthCard({
                     handleSendCode()
                   }
                 }}
-                placeholder="your@email.com"
                 className="w-full bg-muted text-foreground placeholder:text-muted-foreground outline-none p-4 rounded-xl"
                 autoFocus
               />

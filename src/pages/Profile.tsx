@@ -446,7 +446,7 @@ export function Profile() {
 
               <div className="space-y-1.5">
                 <Label htmlFor="phone" className="text-xs">Phone</Label>
-                <Input id="phone" {...form.register('phone')} placeholder="+99361234567" className="h-9" />
+                <Input id="phone" {...form.register('phone')} className="h-9" />
               </div>
 
               <div className="space-y-1.5">
@@ -464,7 +464,6 @@ export function Profile() {
                 <Select
                   id="city_id"
                   options={cities?.map(c => ({ value: c.id, label: c.name })) || []}
-                  placeholder="Select City"
                   {...form.register('city_id')}
                 />
               </div>
@@ -475,7 +474,6 @@ export function Profile() {
                   id="about_me"
                   rows={2}
                   {...form.register('about_me')}
-                  placeholder="Tell others about yourself"
                   className="resize-none"
                 />
               </div>
@@ -558,14 +556,12 @@ export function Profile() {
                     <Input
                       value={customContactLabel}
                       onChange={(e) => setCustomContactLabel(e.target.value)}
-                      placeholder="Contact name (e.g. Manager)"
                       className="h-8 w-[150px]"
                     />
                   )}
                   <Input
                     value={newContactValue}
                     onChange={(e) => setNewContactValue(e.target.value)}
-                    placeholder="Link or username"
                     className="h-8 flex-1 min-w-[150px]"
                   />
                   <Button

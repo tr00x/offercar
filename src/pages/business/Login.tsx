@@ -113,7 +113,6 @@ export function BusinessLoginCard({ onUserLoginClick, onRegisterClick, onSuccess
           <Input
             id="biz-email"
             type="email"
-            placeholder="Enter your business email"
             {...form.register('email')}
           />
           {form.formState.errors.email && (
@@ -128,7 +127,6 @@ export function BusinessLoginCard({ onUserLoginClick, onRegisterClick, onSuccess
           <Input
             id="biz-password"
             type="password"
-            placeholder="Enter your password"
             {...form.register('password')}
           />
           {form.formState.errors.password && (
@@ -155,8 +153,14 @@ export function BusinessLoginCard({ onUserLoginClick, onRegisterClick, onSuccess
             type="button"
             className="text-primary hover:underline font-medium"
             onClick={(e) => {
+              e.preventDefault()
               e.stopPropagation()
-              onRegisterClick?.()
+              console.log('Register button clicked!')
+              if (onRegisterClick) {
+                onRegisterClick()
+              } else {
+                window.location.href = '/biz/apply'
+              }
             }}
           >
             Register here
