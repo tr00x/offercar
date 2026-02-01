@@ -829,10 +829,10 @@ export function CarDetail() {
                           <Phone className="h-4 w-4" />
                           <div className="flex flex-col items-center leading-tight">
                             <span className="text-sm font-semibold">
-                              Call now
+                              Contacts
                             </span>
                             <span className="text-[11px] text-primary-foreground/80">
-                              numbers
+                              reach out
                             </span>
                           </div>
                         </div>
@@ -955,7 +955,7 @@ export function CarDetail() {
             >
               <div className="flex w-full items-center justify-center gap-2">
                 <Phone className="h-4 w-4" />
-                <span className="text-sm font-semibold">Call</span>
+                <span className="text-sm font-semibold">Контакты</span>
               </div>
             </Button>
             {showMobilePhone && (
