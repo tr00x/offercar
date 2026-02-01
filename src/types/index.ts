@@ -37,6 +37,7 @@ export interface Generation {
   start_year?: number
   end_year?: number
   modifications?: Modification[]
+  image?: string
 }
 
 export interface Modification {
@@ -145,6 +146,13 @@ export interface Car {
   updated_at?: string
   owner?: CarOwner
   status?: string | number
+  my_car?: boolean
+}
+
+export interface ApiError {
+  message: string
+  status?: number
+  errors?: Record<string, string[]>
 }
 
 export interface CarsResponse {
@@ -222,6 +230,7 @@ export interface Profile {
   google?: string
   notification?: boolean
   registered_by?: string
+  city_id?: number
 }
 
 export interface ThirdPartyProfile {
@@ -244,6 +253,7 @@ export interface ThirdPartyProfile {
   phone?: string
   destinations?: Destination[]
   role_id?: number
+  city?: City
 }
 
 export interface UpdateProfileRequest {
@@ -335,4 +345,83 @@ export interface SuccessResponse {
 export interface SuccessWithId {
   success: boolean
   id: number
+}
+
+// Chat types (matching backend WebSocket models)
+export interface ChatConversation {
+  id: number
+  user_id: number
+  username: string
+  avatar?: string
+  last_message: string
+  last_message_type: number
+  last_message_id: number
+  unread_messages: number
+  last_active_date: string
+}
+
+export interface ChatMessage {
+  id: number
+  conversation_id?: number
+  sender_id: number
+  message: string
+  type: number // 1=text, 2=item/car, 3=video, 4=image
+  status?: number // 1=unread, 2=read
+  created_at: string
+}
+
+export interface ChatUser {
+  id: number
+  username: string
+  avatar?: string
+  last_active_date?: string
+  messages: ChatMessage[]
+}
+
+// WebSocket event types
+export type WSEventType = 'ping' | 'private_message' | 'ack' | 'new_message' | 'connected' | 'error'
+
+export interface WSMessage {
+  event: WSEventType
+  target_user_id?: number
+  data?: unknown
+}
+
+export interface WSPrivateMessageData {
+  message: string
+  type: number
+  time: string
+  target_user_id: number
+}
+
+export interface WSNewMessageData {
+  id: number
+  username: string
+  avatar?: string
+  last_active_date?: string
+  messages: ChatMessage[]
+}
+
+// Message types (numeric values matching backend)
+export const MESSAGE_TYPE = {
+  Text: 1,
+  Item: 2,
+  Video: 3,
+  Image: 4,
+} as const
+
+export type MessageType = (typeof MESSAGE_TYPE)[keyof typeof MESSAGE_TYPE]
+
+// Local message status for UI (not from backend)
+export type MessageStatus = 'pending' | 'sent' | 'failed'
+
+export interface LocalMessage {
+  id: number
+  localId?: string
+  conversation_id?: number
+  sender_id: number
+  message: string
+  type: number
+  created_at: string
+  status?: MessageStatus
 }

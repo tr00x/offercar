@@ -1,5 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { getLikedCars, likeCar, unlikeCar } from '@/api/cars'
+import type { Car } from '@/types'
 import { toast } from 'react-hot-toast'
 import { useAuth } from '@/store/auth'
 
@@ -7,7 +8,7 @@ export function useFavorites() {
   const { isAuthenticated } = useAuth()
   const queryClient = useQueryClient()
 
-  const { data: likedCars = [], isLoading } = useQuery({
+  const { data: likedCars = [], isLoading } = useQuery<Car[]>({
     queryKey: ['liked-cars'],
     queryFn: async () => {
       if (!isAuthenticated) return []
@@ -19,10 +20,10 @@ export function useFavorites() {
   })
 
   // Create a Set for O(1) lookups
-  const likedSet = new Set(likedCars.map(car => car.id))
+  const likedSet = new Set(likedCars.map((car) => car.id))
 
   const toggleMutation = useMutation({
-    mutationFn: async ({ id, isLiked, car: _car }: { id: number; isLiked: boolean; car?: any }) => {
+    mutationFn: async ({ id, isLiked }: { id: number; isLiked: boolean; car?: Car }) => {
       if (!isAuthenticated) {
         throw new Error('Unauthorized')
       }
@@ -39,15 +40,15 @@ export function useFavorites() {
       await queryClient.cancelQueries({ queryKey: ['liked-cars'] })
 
       // Snapshot the previous value
-      const previousLikedCars = queryClient.getQueryData(['liked-cars'])
+      const previousLikedCars = queryClient.getQueryData<Car[]>(['liked-cars'])
 
       // Optimistically update to the new value
-      queryClient.setQueryData(['liked-cars'], (old: any[]) => {
+      queryClient.setQueryData<Car[]>(['liked-cars'], (old) => {
         const currentList = Array.isArray(old) ? old : []
         
         if (isLiked) {
           // Removing
-          return currentList.filter((c: any) => c.id !== id)
+          return currentList.filter((c) => c.id !== id)
         } else {
           // Adding
           // If we have the car object, add it. Otherwise, adding just ID might be risky for UI rendering,
@@ -56,19 +57,21 @@ export function useFavorites() {
           // (so it won't appear in Favorites page until refetch), but we still want the button to update.
           // However, isLiked check relies on this list.
           // Let's add it if car is provided, or a placeholder if not.
-          const newCar = car || { id }
+          const newCar: Car = car || { id } as Car
           return [...currentList, newCar]
         }
       })
 
       return { previousLikedCars }
     },
-    onError: (err, _newTodo, context) => {
+    onError: (err, _variables, context) => {
       if (err.message === 'Unauthorized') {
         toast.error('Please login to manage favorites')
         return
       }
-      queryClient.setQueryData(['liked-cars'], context?.previousLikedCars)
+      if (context?.previousLikedCars) {
+        queryClient.setQueryData<Car[]>(['liked-cars'], context.previousLikedCars)
+      }
       toast.error('Failed to update favorites')
     },
     onSuccess: (data) => {
@@ -80,7 +83,7 @@ export function useFavorites() {
 
   const isLiked = (id: number) => likedSet.has(id)
 
-  const toggleLike = (id: number, car?: any) => {
+  const toggleLike = (id: number, car?: Car) => {
     if (!isAuthenticated) {
       toast.error('Please login to add to favorites')
       // Redirect or open modal could go here
@@ -90,23 +93,25 @@ export function useFavorites() {
   }
 
   const clearMutation = useMutation({
-    mutationFn: async (carsToClear: any[]) => {
+    mutationFn: async (carsToClear: Car[]) => {
       if (!isAuthenticated) throw new Error('Unauthorized')
-      const promises = carsToClear.map(car => unlikeCar(car.id))
+      const promises = carsToClear.map((car) => unlikeCar(car.id))
       await Promise.all(promises)
       return carsToClear.length
     },
     onMutate: async () => {
       await queryClient.cancelQueries({ queryKey: ['liked-cars'] })
-      const previousLikedCars = queryClient.getQueryData(['liked-cars'])
-      queryClient.setQueryData(['liked-cars'], [])
+      const previousLikedCars = queryClient.getQueryData<Car[]>(['liked-cars'])
+      queryClient.setQueryData<Car[]>(['liked-cars'], [])
       return { previousLikedCars }
     },
     onError: (_err, _ignored, context) => {
-      queryClient.setQueryData(['liked-cars'], context?.previousLikedCars)
+      if (context?.previousLikedCars) {
+        queryClient.setQueryData<Car[]>(['liked-cars'], context.previousLikedCars)
+      }
       toast.error('Failed to clear favorites')
     },
-    onSuccess: (_count) => {
+    onSuccess: () => {
       toast.success('All favorites cleared')
       queryClient.invalidateQueries({ queryKey: ['liked-cars'] })
     },

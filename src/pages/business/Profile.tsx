@@ -1,15 +1,14 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
-import { Link, useNavigate } from 'react-router-dom'
-import { getProfile, getThirdPartyProfile, updateProfile, updateThirdPartyProfile, getMyCarsOnSale, uploadAvatar, deleteAvatar, uploadBanner, deleteBanner, getCountries, addDestination, deleteDestination } from '@/api/profile'
-import { getCities } from '@/api/references'
-import type { UpdateThirdPartyProfileRequest, SuccessResponse } from '@/types'
+import { useNavigate, Link } from 'react-router-dom'
+import { getProfile, getThirdPartyProfile, updateProfile, updateThirdPartyProfile, uploadAvatar, deleteAvatar, uploadBanner, deleteBanner, saveDestinations, getMyCarsOnSale, deleteAccount } from '@/api/profile'
+import { getCountries, getCities } from '@/api/references'
+import type { UpdateThirdPartyProfileRequest, SuccessResponse, Car as CarType, Destination } from '@/types'
 import { getImageUrl } from '@/api/client'
 import { useAuth } from '@/store/auth'
-import { CarCard } from '@/components/cars/CarCard'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -17,30 +16,17 @@ import { Select } from '@/components/ui/select'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { Spinner } from '@/components/ui/spinner'
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu"
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog'
-import { User, Mail, Phone, Settings, Plus, Camera, Trash2, X, MapPin, Image as ImageIcon, Instagram, Facebook, Twitter, Linkedin, Youtube, Globe, MessageCircle, Video, ChevronDown, Send, CheckCircle2, Info, Car, Calendar, ChevronRight } from 'lucide-react'
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
+import { User, Mail, Phone, Plus, Camera, Trash2, X, MapPin, Image as ImageIcon, Info, CheckCircle2, Settings, ChevronRight, Car, ChevronDown, Globe } from 'lucide-react'
 import { toast } from 'react-hot-toast'
+import { CarCard } from '@/components/cars/CarCard'
+import { SOCIAL_NETWORKS } from '@/lib/social-icons'
 
-const SOCIAL_NETWORKS = [
-  { value: 'instagram', label: 'Instagram', icon: Instagram },
-  { value: 'facebook', label: 'Facebook', icon: Facebook },
-  { value: 'twitter', label: 'Twitter/X', icon: Twitter },
-  { value: 'linkedin', label: 'LinkedIn', icon: Linkedin },
-  { value: 'youtube', label: 'YouTube', icon: Youtube },
-  { value: 'website', label: 'Website', icon: Globe },
-  { value: 'telegram', label: 'Telegram', icon: Send },
-  { value: 'whatsapp', label: 'WhatsApp', icon: MessageCircle },
-  { value: 'tiktok', label: 'TikTok', icon: Video },
-]
+import { cn, getErrorMessage } from '@/lib/utils'
 
 const profileSchema = z.object({
-  name: z.string().min(2, 'Name must be at least 2 characters'),
+  name: z.string().min(3, 'Name must be at least 3 characters').max(20, 'Name must be at most 20 characters'),
   email: z.string().email('Invalid email').optional().or(z.literal('')),
   phone: z.string().optional(),
   about_us: z.string().optional(),
@@ -48,15 +34,13 @@ const profileSchema = z.object({
   latitude: z.string().optional(),
   longitude: z.string().optional(),
   city_id: z.string().optional(),
-  birthday: z.string().optional(),
-  driving_experience: z.string().optional(),
 })
 
 type ProfileFormData = z.infer<typeof profileSchema>
 
 export function BusinessProfile() {
   const navigate = useNavigate()
-  const { isAuthenticated, refreshUser, logout } = useAuth()
+  const { isAuthenticated, refreshUser, logout, openAuthModal } = useAuth()
   const queryClient = useQueryClient()
   const [isEditing, setIsEditing] = useState(false)
   const [avatarError, setAvatarError] = useState(false)
@@ -79,15 +63,17 @@ export function BusinessProfile() {
   const [isAddingDestination, setIsAddingDestination] = useState(false)
   const [fromCountryId, setFromCountryId] = useState<string>('')
   const [toCountryId, setToCountryId] = useState<string>('')
+  const [localDestinations, setLocalDestinations] = useState<Destination[]>([])
   
   const [showDetails, setShowDetails] = useState(false)
 
   // Redirect if not authenticated
   useEffect(() => {
     if (!isAuthenticated) {
-      navigate('/auth')
+      navigate('/')
+      openAuthModal()
     }
-  }, [isAuthenticated, navigate])
+  }, [isAuthenticated, navigate, openAuthModal])
 
   const { data: profile, isLoading: profileLoading } = useQuery({
     queryKey: ['profile'],
@@ -114,6 +100,8 @@ export function BusinessProfile() {
     queryFn: () => getMyCarsOnSale({ limit: 100 }),
   })
 
+  const inventoryCount = carsData?.total ?? carsData?.items?.length ?? 0
+
   const updateMutation = useMutation({
     mutationFn: updateProfile,
     onSuccess: () => {
@@ -121,10 +109,9 @@ export function BusinessProfile() {
       queryClient.invalidateQueries({ queryKey: ['third-party-profile'] })
       refreshUser()
     },
-    onError: (error: any) => {
+    onError: (error: unknown) => {
       console.error('Update profile error:', error)
-      const msg = error.response?.data?.message || 'Failed to update profile'
-      toast.error(msg)
+      toast.error(getErrorMessage(error, 'Failed to update profile'))
     }
   })
 
@@ -136,8 +123,9 @@ export function BusinessProfile() {
       refreshUser()
       setAvatarVersion(Date.now())
     },
-    onError: (error: any) => {
+    onError: (error: unknown) => {
       console.error('Upload avatar error:', error)
+      toast.error(getErrorMessage(error, 'Failed to upload avatar'))
     }
   })
 
@@ -147,9 +135,8 @@ export function BusinessProfile() {
       queryClient.invalidateQueries({ queryKey: ['third-party-profile'] })
       setBannerVersion(Date.now())
     },
-    onError: (error: any) => {
-      const msg = error.response?.data?.message || 'Failed to upload banner'
-      toast.error(`Upload failed: ${msg}`)
+    onError: (error: unknown) => {
+      toast.error(`Upload failed: ${getErrorMessage(error, 'Failed to upload banner')}`)
     }
   })
 
@@ -160,9 +147,8 @@ export function BusinessProfile() {
       setBannerVersion(Date.now())
       toast.success('Banner removed successfully')
     },
-    onError: (error: any) => {
-      const msg = error.response?.data?.message || 'Failed to remove banner'
-      toast.error(msg)
+    onError: (error: unknown) => {
+      toast.error(getErrorMessage(error, 'Failed to remove banner'))
     }
   })
 
@@ -182,37 +168,39 @@ export function BusinessProfile() {
       setAvatarVersion(Date.now())
       toast.success('Avatar removed successfully')
     },
-    onError: (error: any) => {
-      const message = error.response?.data?.message || 'Failed to remove avatar'
-      toast.error(message)
+    onError: (error: unknown) => {
+      toast.error(getErrorMessage(error, 'Failed to remove avatar'))
     }
   })
 
-  const addDestinationMutation = useMutation({
-    mutationFn: ({ fromId, toId }: { fromId: number; toId: number }) => 
-      addDestination(fromId, toId),
+  const saveDestinationsMutation = useMutation({
+    mutationFn: (destinations: { from_id: number; to_id: number }[]) => 
+      saveDestinations(destinations),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['third-party-profile'] })
       setFromCountryId('')
       setToCountryId('')
       setIsAddingDestination(false)
-      toast.success('Destination added successfully')
     },
-    onError: (error: any) => {
-      const msg = error.response?.data?.message || 'Failed to add destination'
-      toast.error(msg)
+    onError: (error: unknown) => {
+      toast.error(getErrorMessage(error, 'Failed to save destinations'))
     }
   })
 
-  const deleteDestinationMutation = useMutation({
-    mutationFn: deleteDestination,
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['third-party-profile'] })
-      toast.success('Destination removed successfully')
+  const deleteAccountMutation = useMutation({
+    mutationFn: async () => {
+      if (!profile?.id) {
+        throw new Error('Profile is not loaded')
+      }
+      return deleteAccount(profile.id)
     },
-    onError: (error: any) => {
-      const msg = error.response?.data?.message || 'Failed to remove destination'
-      toast.error(msg)
+    onSuccess: () => {
+      toast.success('Account deleted successfully')
+      logout()
+      navigate('/')
+    },
+    onError: (error: unknown) => {
+      toast.error(getErrorMessage(error, 'Failed to delete account'))
     }
   })
 
@@ -226,35 +214,62 @@ export function BusinessProfile() {
   })
   
   useEffect(() => {
-    if (profile) {
-      let lat = ''
-      let lng = ''
-      if (thirdPartyProfile?.coordinates) {
-        const parts = thirdPartyProfile.coordinates.split(',')
-        if (parts.length === 2) {
-          lat = parts[0].trim()
-          lng = parts[1].trim()
-        }
-      }
+    if (!profile) return
 
-      form.reset({
-        name: profile.name || '',
-        email: profile.email || '',
-        phone: profile.phone || '',
-        about_us: thirdPartyProfile?.about_us || '',
-        address: thirdPartyProfile?.address || '',
-        latitude: lat,
-        longitude: lng,
-        city_id: profile.city?.id?.toString() || '',
-        birthday: profile.birthday || '',
-        driving_experience: profile.driving_experience?.toString() || '',
-      })
-      setContacts(thirdPartyProfile?.contacts || profile.contacts || {})
+    let lat = ''
+    let lng = ''
+    if (thirdPartyProfile?.coordinates) {
+      const parts = thirdPartyProfile.coordinates.split(',')
+      if (parts.length === 2) {
+        lat = parts[0].trim()
+        lng = parts[1].trim()
+      }
     }
+
+    form.reset({
+      name: profile.name || '',
+      email: profile.email || '',
+      phone: profile.phone || '',
+      about_us: thirdPartyProfile?.about_us || '',
+      address: thirdPartyProfile?.address || '',
+      latitude: lat,
+      longitude: lng,
+      city_id: profile.city?.id?.toString() || '',
+    })
   }, [profile, thirdPartyProfile, form])
 
+  const mergedContacts = useMemo(
+    () => thirdPartyProfile?.contacts || profile?.contacts || {},
+    [thirdPartyProfile?.contacts, profile?.contacts]
+  )
+  const mergedDestinations = useMemo(
+    () => thirdPartyProfile?.destinations || [],
+    [thirdPartyProfile?.destinations]
+  )
+
+  useEffect(() => {
+    setContacts(mergedContacts)
+  }, [mergedContacts])
+
+  useEffect(() => {
+    setLocalDestinations(mergedDestinations)
+  }, [mergedDestinations])
+
+  const handleDeleteAccount = async () => {
+    if (!profile?.id) {
+      toast.error('Profile is not loaded yet')
+      return
+    }
+
+    const confirmed = window.confirm(
+      'Delete your account? This action cannot be undone.'
+    )
+    if (!confirmed) return
+
+    await deleteAccountMutation.mutateAsync()
+  }
+
   const handleSubmit = async (data: ProfileFormData) => {
-    // Basic validation for lat/lng format if provided
     if ((data.latitude && !data.longitude) || (!data.latitude && data.longitude)) {
       toast.error('Please provide both latitude and longitude or neither')
       return
@@ -279,17 +294,13 @@ export function BusinessProfile() {
         await uploadBannerMutation.mutateAsync(selectedBannerFile)
       }
 
-      // Update basic profile (including email which third-party endpoint might not update)
       await updateMutation.mutateAsync({
         username: data.name,
         email: data.email || undefined,
         phone_number: data.phone || undefined,
         city_id: data.city_id ? parseInt(data.city_id) : undefined,
-        birthday: data.birthday || undefined,
-        driving_experience: data.driving_experience ? parseInt(data.driving_experience) : undefined,
       })
 
-      // Update third-party profile (extra fields)
       let coordinates = undefined
       if (data.latitude && data.longitude) {
         coordinates = `${data.latitude},${data.longitude}`
@@ -303,6 +314,21 @@ export function BusinessProfile() {
         phone: data.phone || undefined,
         coordinates: coordinates,
       })
+
+      // Handle destinations sync (Logist only)
+      if (thirdPartyProfile?.role_id === 3) {
+        const destinationsPayload = localDestinations.map(d => ({
+          from_id: d.from_country.id,
+          to_id: d.to_country.id
+        }))
+        
+        await saveDestinationsMutation.mutateAsync(destinationsPayload)
+      }
+
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['profile'] }),
+        queryClient.invalidateQueries({ queryKey: ['third-party-profile'] })
+      ])
 
       toast.success('Profile updated successfully', { id: toastId })
       setIsEditing(false)
@@ -318,10 +344,9 @@ export function BusinessProfile() {
         URL.revokeObjectURL(previewBannerUrl)
         setPreviewBannerUrl(null)
       }
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Save error:', error)
-      const msg = error.response?.data?.message || error.message || 'Failed to save changes'
-      toast.error(msg, { id: toastId })
+      toast.error(getErrorMessage(error, 'Failed to save changes'), { id: toastId })
     }
   }
 
@@ -379,6 +404,8 @@ export function BusinessProfile() {
       setPreviewBannerUrl(null)
     }
     form.reset()
+    setLocalDestinations(thirdPartyProfile?.destinations || [])
+    setContacts(thirdPartyProfile?.contacts || profile?.contacts || {})
   }
 
   if (profileLoading || thirdPartyLoading) {
@@ -401,9 +428,7 @@ export function BusinessProfile() {
     }
   }
 
-  const phones = profile?.phone 
-    ? profile.phone.split(',').map(p => p.trim()).filter(Boolean)
-    : []
+  const phones = profile?.phone ? [profile.phone] : []
 
   const socialLinks = Object.entries(contacts).length > 0 
     ? Object.entries(contacts).map(([key, value]) => {
@@ -415,6 +440,14 @@ export function BusinessProfile() {
         }
       }).filter((link): link is { key: string, value: string, network: NonNullable<typeof link.network> } => !!link.network)
     : []
+
+  const businessCityName = (thirdPartyProfile as unknown as { city?: { name?: string } } | null)?.city?.name 
+    || profile?.city?.name
+
+  const registeredDate = thirdPartyProfile?.registered ? new Date(thirdPartyProfile.registered) : null
+  const memberSinceLabel = registeredDate 
+    ? registeredDate.toLocaleString('en-US', { month: 'short', year: 'numeric' }) 
+    : null
 
   if (isEditing) {
     return (
@@ -601,20 +634,11 @@ export function BusinessProfile() {
                       </div>
 
                       <div className="space-y-2">
-                        <Label htmlFor="phone">Phones</Label>
-                        <Input id="phone" {...form.register('phone')} placeholder="e.g. +99361234567, +99362345678" />
-                        <p className="text-xs text-muted-foreground">Comma separated numbers for potential buyers.</p>
+                        <Label htmlFor="phone">Phone</Label>
+                        <Input id="phone" {...form.register('phone')} placeholder="e.g. +99361234567" />
+                        <p className="text-xs text-muted-foreground">Main phone number for this account.</p>
                       </div>
 
-                      <div className="space-y-2">
-                        <Label htmlFor="birthday">Birthday</Label>
-                        <Input id="birthday" type="date" {...form.register('birthday')} />
-                      </div>
-
-                      <div className="space-y-2">
-                        <Label htmlFor="driving_experience">Driving Experience (Years)</Label>
-                        <Input id="driving_experience" type="number" {...form.register('driving_experience')} />
-                      </div>
 
                       <div className="space-y-2">
                         <Label htmlFor="address">Address</Label>
@@ -634,26 +658,39 @@ export function BusinessProfile() {
 
                       <div className="space-y-2">
                         <Label htmlFor="latitude">Latitude</Label>
-                        <Input id="latitude" type="number" step="any" {...form.register('latitude')} placeholder="e.g. 25.2048" />
+                        <Input
+                          id="latitude"
+                          type="number"
+                          step="any"
+                          {...form.register('latitude')}
+                          placeholder="e.g. 25.2048"
+                        />
                         <p className="text-xs text-muted-foreground">GPS Latitude coordinate.</p>
                       </div>
 
                       <div className="space-y-2">
                         <Label htmlFor="longitude">Longitude</Label>
-                        <Input id="longitude" type="number" step="any" {...form.register('longitude')} placeholder="e.g. 55.2708" />
+                        <Input
+                          id="longitude"
+                          type="number"
+                          step="any"
+                          {...form.register('longitude')}
+                          placeholder="e.g. 55.2708"
+                        />
                         <p className="text-xs text-muted-foreground">GPS Longitude coordinate.</p>
                       </div>
+
                     </div>
 
                     <div className="space-y-2">
-                      <Label htmlFor="about_us">About Me</Label>
+                      <Label htmlFor="about_us">About Us</Label>
                       <Textarea 
                         id="about_us" 
                         {...form.register('about_us')} 
                         className="min-h-[100px]"
-                        placeholder="Tell us about yourself..."
+                        placeholder="Tell customers about your company..."
                       />
-                      <p className="text-xs text-muted-foreground">A brief description about you or your business.</p>
+                      <p className="text-xs text-muted-foreground">Short description about your company or services.</p>
                     </div>
 
                     {/* Contacts Section */}
@@ -669,7 +706,7 @@ export function BusinessProfile() {
                               <div key={key} className="flex items-center gap-2">
                                 <div className="grid grid-cols-2 gap-2 flex-1">
                                   <div className="text-sm font-medium bg-muted/50 p-2 rounded border flex items-center gap-2">
-                                    <Icon className="h-4 w-4 text-muted-foreground" />
+                                    <Icon className={cn("h-4 w-4", social?.colorClass)} />
                                     {social?.label || key}
                                   </div>
                                   <div className="text-sm bg-muted/50 p-2 rounded border truncate">{value}</div>
@@ -705,7 +742,7 @@ export function BusinessProfile() {
                                         const Icon = social?.icon || Globe
                                         return (
                                           <>
-                                            <Icon className="h-4 w-4" />
+                                            <Icon className={cn("h-4 w-4", social?.colorClass)} />
                                             {social?.label || newContactKey}
                                           </>
                                         )
@@ -717,7 +754,7 @@ export function BusinessProfile() {
                                   <ChevronDown className="h-4 w-4 opacity-50" />
                                 </Button>
                               </DropdownMenuTrigger>
-                              <DropdownMenuContent className="w-[200px] max-h-[300px] overflow-y-auto">
+                              <DropdownMenuContent className="w-[200px] max-h-[300px] overflow-y-auto bg-background border-border">
                                 {SOCIAL_NETWORKS.filter(n => !contacts[n.value]).map((network) => (
                                   <DropdownMenuItem 
                                     key={network.value}
@@ -770,28 +807,41 @@ export function BusinessProfile() {
                         
                         {/* List existing destinations */}
                         <div className="space-y-2">
-                          {thirdPartyProfile?.destinations?.map((dest: any) => (
-                            <div key={dest.id} className="flex items-center justify-between p-3 border rounded-lg bg-muted/30">
+                          {localDestinations.map((dest: Destination, idx: number) => (
+                            <div key={dest.id || idx} className="flex items-center justify-between p-3 border rounded-lg bg-muted/30">
                               <div className="flex items-center gap-2 text-sm">
-                                <span className="text-lg">{dest.from_country?.flag}</span>
+                                {dest.from_country?.flag && (
+                                  <img 
+                                    src={dest.from_country.flag.includes('http') ? dest.from_country.flag.replace(/.*(https?:\/\/)/, '$1') : getImageUrl(dest.from_country.flag)}
+                                    alt={dest.from_country.name}
+                                    className="w-8 h-6 object-cover rounded shadow-sm"
+                                  />
+                                )}
                                 <span className="font-medium">{dest.from_country?.name}</span>
                                 <span className="text-muted-foreground mx-2">→</span>
-                                <span className="text-lg">{dest.to_country?.flag}</span>
+                                {dest.to_country?.flag && (
+                                  <img 
+                                    src={dest.to_country.flag.includes('http') ? dest.to_country.flag.replace(/.*(https?:\/\/)/, '$1') : getImageUrl(dest.to_country.flag)}
+                                    alt={dest.to_country.name}
+                                    className="w-8 h-6 object-cover rounded shadow-sm"
+                                  />
+                                )}
                                 <span className="font-medium">{dest.to_country?.name}</span>
                               </div>
                               <Button
                                 type="button"
                                 variant="ghost"
                                 size="sm"
-                                onClick={() => deleteDestinationMutation.mutate(dest.id)}
-                                disabled={deleteDestinationMutation.isPending}
+                                onClick={() => {
+                                  setLocalDestinations(prev => prev.filter(d => d.id !== dest.id))
+                                }}
                                 className="text-destructive hover:text-destructive hover:bg-destructive/10"
                                 >
                                 <Trash2 className="h-4 w-4" />
                               </Button>
                             </div>
                           ))}
-                          {(!thirdPartyProfile?.destinations || thirdPartyProfile.destinations.length === 0) && (
+                          {localDestinations.length === 0 && (
                             <p className="text-sm text-muted-foreground italic">No destinations added.</p>
                           )}
                         </div>
@@ -804,7 +854,7 @@ export function BusinessProfile() {
                               <div className="space-y-2">
                                 <Label className="text-xs">From</Label>
                                 <Select
-                                  options={countries?.map(c => ({ value: c.id, label: `${c.flag || ''} ${c.name}` })) || []}
+                                  options={countries?.map(c => ({ value: c.id, label: c.name })) || []}
                                   value={fromCountryId}
                                   onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setFromCountryId(e.target.value)}
                                   placeholder="Select country"
@@ -813,7 +863,7 @@ export function BusinessProfile() {
                               <div className="space-y-2">
                                 <Label className="text-xs">To</Label>
                                 <Select
-                                  options={countries?.map(c => ({ value: c.id, label: `${c.flag || ''} ${c.name}` })) || []}
+                                  options={countries?.map(c => ({ value: c.id, label: c.name })) || []}
                                   value={toCountryId}
                                   onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setToCountryId(e.target.value)}
                                   placeholder="Select country"
@@ -826,13 +876,23 @@ export function BusinessProfile() {
                                 size="sm" 
                                 onClick={() => {
                                   if (fromCountryId && toCountryId) {
-                                    addDestinationMutation.mutate({ 
-                                      fromId: parseInt(fromCountryId), 
-                                      toId: parseInt(toCountryId) 
-                                    })
+                                    const fromCountry = countries?.find(c => c.id.toString() === fromCountryId)
+                                    const toCountry = countries?.find(c => c.id.toString() === toCountryId)
+                                    
+                                    if (fromCountry && toCountry) {
+                                      const newDest: Destination = {
+                                        id: Date.now() * -1, // Temporary negative ID
+                                        from_country: fromCountry,
+                                        to_country: toCountry
+                                      }
+                                      setLocalDestinations(prev => [...prev, newDest])
+                                      setFromCountryId('')
+                                      setToCountryId('')
+                                      setIsAddingDestination(false)
+                                    }
                                   }
                                 }}
-                                disabled={!fromCountryId || !toCountryId || addDestinationMutation.isPending}
+                                disabled={!fromCountryId || !toCountryId}
                               >
                                 Add
                               </Button>
@@ -891,119 +951,96 @@ export function BusinessProfile() {
   return (
     <div className="min-h-screen bg-background text-foreground pb-24">
       {/* Header Section */}
-      <div className="relative">
-        {/* Banner */}
-        <div className="h-48 md:h-64 overflow-hidden relative">
-          {thirdPartyProfile?.banner ? (
-            <img 
-              src={`${getImageUrl(thirdPartyProfile.banner)}?v=${bannerVersion}`}
-              alt="Banner" 
-              className="w-full h-full object-cover"
-            />
-          ) : (
-            <div className="w-full h-full bg-muted" />
-          )}
-          
-          {/* Actions: Edit & Logout */}
-          <div className="absolute top-4 right-4 z-20 flex gap-2">
-            <Button 
-              variant="secondary" 
-              size="sm" 
-              className="backdrop-blur-sm bg-background/50 hover:bg-background/80"
-              onClick={() => setIsEditing(true)}
-            >
-              <Settings className="h-4 w-4 mr-2" />
-              Edit Profile
-            </Button>
-            <Button 
-              variant="destructive" 
-              size="sm" 
-              className="backdrop-blur-sm opacity-90 hover:opacity-100"
-              onClick={logout}
-            >
-              Sign Out
-            </Button>
-          </div>
-        </div>
+      <div className="container mx-auto px-4 pt-6">
+        <div className="bg-card border border-border rounded-2xl p-4 shadow-sm">
+          <div className="flex flex-col md:flex-row gap-4">
+            {/* Avatar */}
+            <div className="w-20 h-20 md:w-24 md:h-24 rounded-full bg-muted overflow-hidden shrink-0">
+              {thirdPartyProfile?.avatar || profile?.avatar ? (
+                <img 
+                  src={`${getImageUrl(thirdPartyProfile?.avatar || profile?.avatar || '')}?v=${avatarVersion}`}
+                  alt={profile?.name} 
+                  className="w-full h-full object-cover"
+                />
+              ) : (
+                <div className="w-full h-full flex items-center justify-center">
+                  <User className="h-10 w-10 text-muted-foreground" />
+                </div>
+              )}
+            </div>
 
-        {/* Profile Info Card - Overlapping Banner */}
-        <div className="container mx-auto px-4 -mt-12 relative z-10">
-          <div className="bg-card/95 backdrop-blur-xl border border-border rounded-2xl p-4 shadow-xl">
-            <div className="flex flex-col md:flex-row gap-4">
-              {/* Avatar */}
-              <div className="w-20 h-20 md:w-24 md:h-24 rounded-full border-4 border-background bg-muted overflow-hidden shrink-0 -mt-10 md:-mt-12 shadow-lg">
-                {thirdPartyProfile?.avatar || profile?.avatar ? (
-                  <img 
-                    src={`${getImageUrl(thirdPartyProfile?.avatar || profile?.avatar || '')}?v=${avatarVersion}`}
-                    alt={profile?.name} 
-                    className="w-full h-full object-cover"
-                  />
-                ) : (
-                  <div className="w-full h-full flex items-center justify-center">
-                    <User className="h-10 w-10 text-muted-foreground" />
+            {/* Main Info */}
+            <div className="flex-1 space-y-2">
+              <div>
+                <h1 className="text-xl md:text-2xl font-bold flex items-center gap-2">
+                  {thirdPartyProfile?.company_name || profile?.name || 'User'}
+                  {profile?.role_id && profile.role_id >= 2 && <CheckCircle2 className="h-5 w-5 text-primary" />}
+                </h1>
+                
+                <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-muted-foreground">
+                  <span className="text-primary font-medium">{getRoleLabel()}</span>
+                  {memberSinceLabel && (
+                    <>
+                      <span className="w-1 h-1 rounded-full bg-muted-foreground" />
+                      <span>Since {memberSinceLabel}</span>
+                    </>
+                  )}
+                  {businessCityName && (
+                    <>
+                      <span className="w-1 h-1 rounded-full bg-muted-foreground" />
+                      <span>{businessCityName}</span>
+                    </>
+                  )}
+                </div>
+              </div>
+
+              {/* Location & Contact Summary */}
+              <div className="flex flex-wrap gap-3 text-sm">
+                {thirdPartyProfile?.address && (
+                  <div className="flex items-center gap-1.5 text-foreground/80">
+                    <MapPin className="h-3.5 w-3.5 text-muted-foreground" />
+                    <span className="truncate max-w-[200px]">{thirdPartyProfile.address}</span>
+                  </div>
+                )}
+                {phones.length > 0 && (
+                  <div className="flex items-center gap-1.5 text-foreground/80">
+                    <Phone className="h-3.5 w-3.5 text-muted-foreground" />
+                    <span>{phones[0]}{phones.length > 1 && ` (+${phones.length - 1})`}</span>
                   </div>
                 )}
               </div>
 
-              {/* Main Info */}
-              <div className="flex-1 space-y-2">
-                <div>
-                  <h1 className="text-xl md:text-2xl font-bold flex items-center gap-2">
-                    {thirdPartyProfile?.company_name || profile?.name || 'User'}
-                    {profile?.role_id && profile.role_id >= 2 && <CheckCircle2 className="h-5 w-5 text-primary" />}
-                  </h1>
-                  
-                  <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-muted-foreground">
-                    <span className="text-primary font-medium">{getRoleLabel()}</span>
-                    {thirdPartyProfile?.registered && (
-                      <>
-                        <span className="w-1 h-1 rounded-full bg-muted-foreground" />
-                        <span>Since {new Date(thirdPartyProfile.registered).getFullYear()}</span>
-                      </>
-                    )}
-                  </div>
+              {/* Social Icons Row */}
+              {socialLinks.length > 0 && (
+                <div className="flex gap-2 pt-1">
+                  {socialLinks.map((link) => (
+                    <a 
+                      key={link.key} 
+                      href={link.value} 
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="p-2 rounded-full bg-muted hover:bg-muted/80 text-muted-foreground hover:text-foreground transition-colors"
+                    >
+                      <link.network.icon className="h-4 w-4" />
+                    </a>
+                  ))}
                 </div>
+              )}
+            </div>
 
-                {/* Location & Contact Summary */}
-                <div className="flex flex-wrap gap-3 text-sm">
-                  {thirdPartyProfile?.address && (
-                    <div className="flex items-center gap-1.5 text-foreground/80">
-                      <MapPin className="h-3.5 w-3.5 text-muted-foreground" />
-                      <span className="truncate max-w-[200px]">{thirdPartyProfile.address}</span>
-                    </div>
-                  )}
-                  {phones.length > 0 && (
-                    <div className="flex items-center gap-1.5 text-foreground/80">
-                      <Phone className="h-3.5 w-3.5 text-muted-foreground" />
-                      <span>{phones[0]}{phones.length > 1 && ` (+${phones.length - 1})`}</span>
-                    </div>
-                  )}
-                </div>
-
-                {/* Social Icons Row */}
-                {socialLinks.length > 0 && (
-                  <div className="flex gap-2 pt-1">
-                    {socialLinks.map((link) => (
-                      <a 
-                        key={link.key} 
-                        href={link.value} 
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="p-2 rounded-full bg-muted hover:bg-muted/80 text-muted-foreground hover:text-foreground transition-colors"
-                      >
-                        <link.network.icon className="h-4 w-4" />
-                      </a>
-                    ))}
-                  </div>
-                )}
-              </div>
-
-              {/* Quick Actions */}
-              <div className="flex flex-col gap-2 min-w-[140px]">
-                 <Button variant="outline" className="w-full" onClick={() => setShowDetails(true)}>
-                  More Info
-                </Button>
-              </div>
+            {/* Quick Actions */}
+            <div className="flex flex-col gap-2 min-w-[140px]">
+               <Button variant="outline" className="w-full" onClick={() => setShowDetails(true)}>
+                More Info
+              </Button>
+              <Button 
+                variant="outline" 
+                className="w-full"
+                onClick={() => setIsEditing(true)}
+              >
+                <Settings className="h-4 w-4 mr-2" />
+                Edit Profile
+              </Button>
             </div>
           </div>
         </div>
@@ -1011,50 +1048,67 @@ export function BusinessProfile() {
 
       {/* Main Content Area - Inventory */}
       <div className="container mx-auto px-4 mt-6 space-y-6">
-          <div className="space-y-4">
-            <div className="flex items-center justify-between">
-              <h2 className="text-lg font-bold">Inventory</h2>
-              <span className="text-sm text-muted-foreground">{carsData?.total || 0} cars</span>
+          {thirdPartyProfile?.role_id === 2 && (
+            <div className="space-y-4">
+              <div className="flex items-center justify-between">
+                <h2 className="text-lg font-bold">Inventory</h2>
+              </div>
+
+              <p className="text-muted-foreground mb-4">
+                {inventoryCount ? `${inventoryCount} cars found` : 'No cars found'}
+              </p>
+
+              {carsLoading ? (
+                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-4 gap-5">
+                  {[1, 2, 3, 4].map((i) => (
+                    <div key={i} className="h-48 bg-muted rounded-xl animate-pulse" />
+                  ))}
+                </div>
+              ) : carsData?.items && carsData.items.length > 0 ? (
+                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-4 gap-5">
+                  {carsData.items.map((car: CarType) => (
+                    <CarCard key={car.id} car={car} />
+                  ))}
+                </div>
+              ) : (
+                <div className="text-center py-12 bg-card rounded-xl border border-border border-dashed">
+                  <Car className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
+                  <h3 className="text-muted-foreground">No vehicles currently available</h3>
+                  <Button asChild className="mt-4">
+                    <Link to="/biz/dealer/new">Add First Car</Link>
+                  </Button>
+                </div>
+              )}
             </div>
-            
-            {carsLoading ? (
-              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
-                {[1, 2, 3, 4, 5].map(i => (
-                  <div key={i} className="h-48 bg-muted rounded-xl animate-pulse" />
-                ))}
-              </div>
-            ) : carsData?.items && carsData.items.length > 0 ? (
-              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
-                {carsData.items.map((car: any) => (
-                  <CarCard key={car.id} car={car} />
-                ))}
-              </div>
-            ) : (
-              <div className="text-center py-12 bg-card rounded-xl border border-border border-dashed">
-                <Car className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
-                <h3 className="text-muted-foreground">No vehicles currently available</h3>
-                <Button asChild className="mt-4">
-                   <Link to="/sell">Add First Car</Link>
-                </Button>
-              </div>
-            )}
-          </div>
+          )}
           
           {/* Destinations for Logist */}
           {thirdPartyProfile?.role_id === 3 && thirdPartyProfile.destinations && thirdPartyProfile.destinations.length > 0 && (
              <div className="space-y-3">
                 <h3 className="font-semibold text-lg">Destinations</h3>
                 <div className="space-y-2">
-                  {thirdPartyProfile.destinations.map((dest: any, idx: number) => (
+                  {thirdPartyProfile.destinations.map((dest: Destination, idx: number) => (
                     <div key={idx} className="flex items-center justify-between bg-card p-4 rounded-xl border border-border">
                        <div className="flex items-center gap-2">
-                        <span className="text-lg">{dest.from_country?.flag}</span>
+                        {dest.from_country?.flag && (
+                          <img 
+                            src={dest.from_country.flag.includes('http') ? dest.from_country.flag.replace(/.*(https?:\/\/)/, '$1') : getImageUrl(dest.from_country.flag)}
+                            alt={dest.from_country.name}
+                            className="w-8 h-6 object-cover rounded shadow-sm"
+                          />
+                        )}
                         <span className="font-medium">{dest.from_country?.name}</span>
                        </div>
                        <ChevronRight className="h-4 w-4 text-muted-foreground" />
                        <div className="flex items-center gap-2">
                         <span className="font-medium text-right">{dest.to_country?.name}</span>
-                        <span className="text-lg">{dest.to_country?.flag}</span>
+                        {dest.to_country?.flag && (
+                          <img 
+                            src={dest.to_country.flag.includes('http') ? dest.to_country.flag.replace(/.*(https?:\/\/)/, '$1') : getImageUrl(dest.to_country.flag)}
+                            alt={dest.to_country.name}
+                            className="w-8 h-6 object-cover rounded shadow-sm"
+                          />
+                        )}
                        </div>
                     </div>
                   ))}
@@ -1065,8 +1119,8 @@ export function BusinessProfile() {
 
       {/* Details Dialog */}
       <Dialog open={showDetails} onOpenChange={setShowDetails}>
-        <DialogContent className="max-w-md max-h-[85vh] overflow-y-auto p-0 gap-0 bg-card border-border">
-          <DialogHeader className="p-6 pb-2 sticky top-0 bg-card z-10 border-b border-border/40 backdrop-blur-sm">
+        <DialogContent className="max-w-lg p-0">
+          <DialogHeader className="p-6 pb-2">
             <DialogTitle className="text-xl font-semibold flex items-center gap-2">
               {thirdPartyProfile?.avatar || profile?.avatar ? (
                 <img 
@@ -1091,7 +1145,7 @@ export function BusinessProfile() {
                   <Info className="h-4 w-4" />
                   About Us
                 </h3>
-                <div className="bg-muted/50 rounded-lg p-4 text-sm leading-relaxed text-foreground/90 whitespace-pre-wrap">
+                <div className="bg-muted/50 rounded-lg p-4 text-sm leading-relaxed text-foreground/90 whitespace-pre-line break-all">
                   {thirdPartyProfile.about_us}
                 </div>
               </section>
@@ -1140,7 +1194,7 @@ export function BusinessProfile() {
                       </div>
                       <div className="flex-1 min-w-0">
                         <p className="text-xs text-muted-foreground mb-0.5">Address</p>
-                        <p className="text-sm font-medium leading-tight mb-1">{thirdPartyProfile.address}</p>
+                        <p className="text-sm font-medium leading-tight mb-1 break-all">{thirdPartyProfile.address}</p>
                       </div>
                     </div>
                   )}
@@ -1197,7 +1251,7 @@ export function BusinessProfile() {
                       className="flex items-center gap-3 p-2.5 rounded-lg border border-border/50 hover:bg-muted/50 hover:border-border transition-all group"
                     >
                       <div className="w-8 h-8 rounded-full bg-muted flex items-center justify-center shrink-0 group-hover:scale-110 transition-transform">
-                        <link.network.icon className="h-4 w-4 text-foreground/70" />
+                        <link.network.icon className={cn("h-4 w-4", link.network.colorClass)} />
                       </div>
                       <span className="text-sm font-medium truncate">{link.network.label}</span>
                     </a>
@@ -1205,6 +1259,31 @@ export function BusinessProfile() {
                 </div>
               </section>
             )}
+
+            {/* Account Actions */}
+            <section className="space-y-3">
+              <h3 className="text-sm font-medium text-muted-foreground uppercase tracking-wider flex items-center gap-2">
+                <Settings className="h-4 w-4" />
+                Account
+              </h3>
+              <div className="space-y-2">
+                <p className="text-xs text-muted-foreground">
+                  Delete your account to remove this business profile and access.
+                </p>
+                <Button
+                  type="button"
+                  variant="destructive"
+                  className="w-full sm:w-auto"
+                  onClick={handleDeleteAccount}
+                  disabled={deleteAccountMutation.isPending}
+                >
+                  {deleteAccountMutation.isPending && (
+                    <Spinner size="sm" className="mr-2" />
+                  )}
+                  Delete account
+                </Button>
+              </div>
+            </section>
           </div>
         </DialogContent>
       </Dialog>

@@ -11,10 +11,11 @@ import { Select } from '@/components/ui/select'
 import { Spinner } from '@/components/ui/spinner'
 import { sendBusinessApplication, setTokens, uploadApplicationDocuments } from '@/api/auth'
 import { getCompanyTypes, getActivityFields } from '@/api/references'
+import { getProfile, getThirdPartyProfile } from '@/api/profile'
 import { useAuth } from '@/store/auth'
 import { Building2, Car, Truck, Users, Wrench, Check } from 'lucide-react'
 import { toast } from 'react-hot-toast'
-import { cn } from '@/lib/utils'
+import { cn, getErrorMessage } from '@/lib/utils'
 
 const businessTypes = [
   { id: 2, name: 'Dealer', icon: Car, description: 'Sell cars from your dealership' },
@@ -35,14 +36,13 @@ const applySchema = z.object({
   vat_number: z.string().min(1, 'Please enter VAT number'),
   licence_issue_date: z.string().min(1, 'Please enter licence issue date'),
   licence_expiry_date: z.string().min(1, 'Please enter licence expiry date'),
-  password: z.string().min(6, 'Password must be at least 6 characters'),
 })
 
 type ApplyFormData = z.infer<typeof applySchema>
 
 export function BusinessApply() {
   const navigate = useNavigate()
-  const { refreshUser } = useAuth()
+  const { refreshUser, openAuthModal } = useAuth()
   const [step, setStep] = useState<'type' | 'form' | 'docs'>('type')
   const [selectedType, setSelectedType] = useState<number | null>(null)
   const [isLoading, setIsLoading] = useState(false)
@@ -126,7 +126,7 @@ export function BusinessApply() {
       localStorage.setItem('pending_docs', '1')
       setStep('docs')
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : 'Failed to submit application'
+      const message = getErrorMessage(err, 'Failed to submit application')
       setError(message)
       toast.error(message)
     } finally {
@@ -149,7 +149,7 @@ async function onUploadDocs() {    setError(null)
       let roleId = 2 // Default to dealer
       try {
         const profile = await getProfile()
-        roleId = profile.role_id
+        roleId = profile.role_id || 2
         
         // Check third party profile if role seems to be user
         if (!roleId || roleId < 2) {
@@ -158,7 +158,7 @@ async function onUploadDocs() {    setError(null)
             if (thirdParty?.role_id) {
               roleId = thirdParty.role_id
             }
-          } catch (e) {
+          } catch {
             // ignore
           }
         }
@@ -175,9 +175,11 @@ async function onUploadDocs() {    setError(null)
         default: navigate('/biz/dealer/garage');
       }
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : 'Failed to upload documents'
-      setError(message)
-      toast.error(message)
+      console.error('Document upload error:', err)
+      const msg = getErrorMessage(err, 'Failed to upload documents')
+      
+      setError(msg)
+      toast.error(msg)
     } finally {
       setIsLoading(false)
     }
@@ -217,9 +219,13 @@ async function onUploadDocs() {    setError(null)
 
             <p className="text-center text-sm text-muted-foreground mt-8">
               Already have a business account?{' '}
-              <a href="/biz/auth" className="text-primary hover:underline">
+              <button
+                type="button"
+                onClick={openAuthModal}
+                className="text-primary hover:underline"
+              >
                 Log in here
-              </a>
+              </button>
             </p>
           </>
         ) : step === 'form' ? (
@@ -367,15 +373,6 @@ async function onUploadDocs() {    setError(null)
                       </div>
                     </div>
 
-                    <div className="space-y-2 mt-4">
-                      <Label>Password *</Label>
-                      <Input type="password" {...form.register('password')} />
-                      {form.formState.errors.password && (
-                        <p className="text-sm text-destructive">
-                          {form.formState.errors.password.message}
-                        </p>
-                      )}
-                    </div>
                   </div>
 
                   <Button type="submit" className="w-full" disabled={isLoading}>

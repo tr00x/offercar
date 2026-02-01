@@ -16,6 +16,8 @@ export interface ComboboxProps {
   searchPlaceholder?: string
   className?: string
   disabled?: boolean
+  triggerClassName?: string
+  filterOptions?: (options: ComboboxOption[], search: string) => ComboboxOption[]
 }
 
 export function Combobox({
@@ -26,6 +28,8 @@ export function Combobox({
   searchPlaceholder = "Search...",
   className,
   disabled = false,
+  triggerClassName,
+  filterOptions,
 }: ComboboxProps) {
   const [open, setOpen] = React.useState(false)
   const [search, setSearch] = React.useState("")
@@ -43,11 +47,14 @@ export function Combobox({
   }, [])
 
   const filteredOptions = React.useMemo(() => {
+    if (filterOptions) {
+      return filterOptions(options, search)
+    }
     if (!search) return options
     return options.filter((option) =>
       option.label.toLowerCase().includes(search.toLowerCase())
     )
-  }, [options, search])
+  }, [options, search, filterOptions])
 
   const selectedOption = options.find((option) => option.value === value)
 
@@ -55,9 +62,10 @@ export function Combobox({
     <div className={cn("relative", className)} ref={containerRef}>
       <div
         className={cn(
-          "flex h-10 w-full items-center justify-between rounded-lg border border-input bg-background px-3 py-2 text-sm ring-offset-background cursor-pointer",
+          "flex h-10 w-full items-center justify-between rounded-lg border border-input bg-muted px-3 py-2 text-sm ring-offset-background cursor-pointer",
           disabled ? "cursor-not-allowed opacity-50" : "hover:bg-accent hover:text-accent-foreground",
-          open && "ring-2 ring-ring ring-offset-2"
+          open && "ring-2 ring-ring ring-offset-2",
+          triggerClassName
         )}
         onClick={() => !disabled && setOpen(!open)}
       >
@@ -80,7 +88,7 @@ export function Combobox({
       </div>
 
       {open && (
-        <div className="absolute z-50 mt-1 max-h-60 w-full min-w-full overflow-auto rounded-md border bg-card text-card-foreground shadow-md [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-muted [&::-webkit-scrollbar-thumb]:rounded-full">
+        <div className="absolute z-50 mt-1 max-h-60 w-max min-w-full overflow-auto rounded-md border bg-card text-card-foreground shadow-md [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-muted [&::-webkit-scrollbar-thumb]:rounded-full">
           <div className="sticky top-0 z-10 bg-card p-2 border-b">
             <div className="flex items-center px-2 border rounded-md bg-background">
               <Search className="mr-2 h-4 w-4 shrink-0 opacity-50" />
@@ -112,12 +120,6 @@ export function Combobox({
                     setSearch("")
                   }}
                 >
-                  <Check
-                    className={cn(
-                      "mr-2 h-4 w-4 shrink-0",
-                      value === option.value ? "opacity-100" : "opacity-0"
-                    )}
-                  />
                   {option.image && (
                     <div className="relative mr-2 h-6 w-6 shrink-0 overflow-hidden rounded-sm bg-muted">
                       <img 
@@ -130,7 +132,13 @@ export function Combobox({
                       />
                     </div>
                   )}
-                  <span className="truncate">{option.label}</span>
+                  <span className="flex-1 text-left whitespace-nowrap">{option.label}</span>
+                  <Check
+                    className={cn(
+                      "ml-2 h-4 w-4 shrink-0",
+                      value === option.value ? "opacity-100" : "opacity-0"
+                    )}
+                  />
                 </div>
               ))
             )}

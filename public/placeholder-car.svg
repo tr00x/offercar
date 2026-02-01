@@ -1,7 +1,0 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="400" height="250" viewBox="0 0 400 250">
-  <rect width="400" height="250" fill="#f1f5f9"/>
-  <g fill="#94a3b8">
-    <path d="M200 85c-30 0-55 12-70 30l-10 20h-20c-8 0-15 7-15 15v40c0 8 7 15 15 15h10c0 15 12 27 27 27s27-12 27-27h72c0 15 12 27 27 27s27-12 27-27h10c8 0 15-7 15-15v-40c0-8-7-15-15-15h-20l-10-20c-15-18-40-30-70-30zm-63 75c-10 0-18-8-18-18s8-18 18-18 18 8 18 18-8 18-18 18zm126 0c-10 0-18-8-18-18s8-18 18-18 18 8 18 18-8 18-18 18z"/>
-  </g>
-  <text x="200" y="200" text-anchor="middle" fill="#64748b" font-family="system-ui, sans-serif" font-size="14">No image available</text>
-</svg>

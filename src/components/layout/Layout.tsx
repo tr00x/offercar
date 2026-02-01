@@ -3,6 +3,7 @@ import { Header } from './Header'
 import { BusinessHeader } from './BusinessHeader'
 import { Footer } from './Footer'
 import { BottomNav } from './BottomNav'
+import { GlobalAuthModal } from '@/components/modals/GlobalAuthModal'
 
 export function Layout() {
   const { pathname } = useLocation()
@@ -15,16 +16,23 @@ export function Layout() {
     pathname.startsWith('/biz/service') ||
     pathname === '/biz/profile'
 
+  // Hide bottom nav on car detail pages
+  const isCarDetail = /^\/cars\/[^/]+$/.test(pathname)
+  const showBottomNav = !isCarDetail
+
   return (
-    <div className="min-h-screen flex flex-col">
-      {isBusinessDashboard ? <BusinessHeader /> : <Header />}
+    <div className="min-h-[100svh] flex flex-col">
+      <div className={isCarDetail ? "hidden md:block" : ""}>
+        {isBusinessDashboard ? <BusinessHeader /> : <Header />}
+      </div>
       <main className="flex-1">
         <Outlet />
       </main>
       <Footer />
       {/* Spacer for BottomNav on mobile */}
-      <div className="md:hidden h-[calc(4rem+env(safe-area-inset-bottom))]" />
-      <BottomNav />
+      {showBottomNav && <div className="md:hidden h-[calc(4rem+env(safe-area-inset-bottom))]" />}
+      {showBottomNav && <BottomNav />}
+      <GlobalAuthModal />
     </div>
   )
 }

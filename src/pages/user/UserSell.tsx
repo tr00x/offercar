@@ -1,17 +1,16 @@
 import { useState, useEffect, useMemo } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { useForm, useWatch, type SubmitHandler } from 'react-hook-form'
+import { useForm, useWatch, type Resolver } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Combobox } from '@/components/ui/combobox'
 import { Spinner } from '@/components/ui/spinner'
 import { useAuth } from '@/store/auth'
-import { createCar, updateCar, uploadCarImages, getCarEditData, deleteCarImage } from '@/api/cars'
+import { createCar, updateCar, uploadCarImages, getCarEditData, deleteCarImage, getPriceRecommendation } from '@/api/cars'
 import { getImageUrl } from '@/api/client'
 import {
   getBrands,
@@ -22,23 +21,26 @@ import {
   getYearsForModel,
   getBodyTypesForModel,
 } from '@/api/references'
-import { Plus, X, Upload, AlertCircle } from 'lucide-react'
+import type { Modification } from '@/types'
+import { Textarea } from '@/components/ui/textarea'
+import { Plus, X, Upload, AlertCircle, Trash2, Check } from 'lucide-react'
 import toast from 'react-hot-toast'
+import { compressImage } from '@/utils/imageCompression'
 
 const sellSchema = z.object({
-  brand_id: z.number({ message: 'Please select a brand' }),
-  model_id: z.number({ message: 'Please select a model' }),
-  body_type_id: z.number({ message: 'Please select a body type' }),
-  generation_id: z.number({ message: 'Please select a generation' }),
-  modification_id: z.number({ message: 'Please select a modification' }),
-  city_id: z.number({ message: 'Please select a city' }),
-  color_id: z.number({ message: 'Please select a color' }),
-  year: z.number({ message: 'Please select a year' }).min(1900).max(new Date().getFullYear() + 1),
-  price: z.number({ message: 'Please enter the price' }).min(1),
-  odometer: z.number({ message: 'Please enter the mileage' }).min(0),
-  phone_numbers: z.array(z.string()).min(1, 'Please add at least one phone number'),
+  brand_id: z.number({ message: 'Select brand' }),
+  model_id: z.number({ message: 'Select model' }),
+  body_type_id: z.number({ message: 'Select body type' }),
+  generation_id: z.number({ message: 'Select generation' }),
+  modification_id: z.number({ message: 'Select modification' }),
+  city_id: z.number({ message: 'Select city' }),
+  color_id: z.number({ message: 'Select color' }),
+  year: z.number({ message: 'Select year' }).min(1900).max(new Date().getFullYear() + 1),
+  price: z.number({ message: 'Enter price' }).min(1, 'Price must be greater than 0'),
+  odometer: z.number({ message: 'Enter mileage' }).min(0),
+  phone_numbers: z.array(z.string()).min(1, 'Enter at least one phone number'),
   trade_in: z.number().default(1),
-  vin_code: z.string().min(1, 'Please enter the VIN code'),
+  vin_code: z.string().min(1, 'Enter VIN code'),
   wheel: z.boolean(),
   crash: z.boolean().default(false),
   new: z.boolean().default(false),
@@ -48,27 +50,32 @@ const sellSchema = z.object({
 
 type SellFormData = z.infer<typeof sellSchema>
 
-export function UserSell() {
+type UserSellProps = {
+  editId?: string | null
+}
+
+export function UserSell(props: UserSellProps = {}) {
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
-  const editId = searchParams.get('editId')
-  const { isAuthenticated } = useAuth()
+  const editId = props.editId ?? searchParams.get('editId')
+  const { isAuthenticated, openAuthModal } = useAuth()
   const [images, setImages] = useState<File[]>([])
   const [existingImages, setExistingImages] = useState<string[]>([])
+  const [pendingDeleteImages, setPendingDeleteImages] = useState<string[]>([])
   const [phoneNumbers, setPhoneNumbers] = useState<string[]>([''])
   const [error, setError] = useState<string | null>(null)
-  const queryClient = useQueryClient()
+  const [loadingMessage, setLoadingMessage] = useState<string | null>(null)
 
-  // Redirect if not authenticated
-  useEffect(() => {
-    if (!isAuthenticated) {
-      navigate('/auth', { state: { from: '/sell' } })
-    }
-  }, [isAuthenticated, navigate])
+  const TRADE_IN_OPTIONS = [
+    { value: 1, label: 'No exchange' },
+    { value: 2, label: 'Equal value' },
+    { value: 3, label: 'With surcharge' },
+    { value: 4, label: 'Cheaper' },
+    { value: 5, label: 'Not a car' },
+  ]
 
   const form = useForm<SellFormData>({
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    resolver: zodResolver(sellSchema) as any,
+    resolver: zodResolver(sellSchema) as unknown as Resolver<SellFormData>,
     defaultValues: {
       trade_in: 1,
       wheel: true,
@@ -88,6 +95,47 @@ export function UserSell() {
   const cityId = useWatch({ control: form.control, name: 'city_id' })
   const colorId = useWatch({ control: form.control, name: 'color_id' })
   const tradeIn = useWatch({ control: form.control, name: 'trade_in' })
+  const odometer = useWatch({ control: form.control, name: 'odometer' })
+  const isCrash = useWatch({ control: form.control, name: 'crash' })
+  const owners = useWatch({ control: form.control, name: 'owners' })
+
+  const { data: priceSuggestion, isLoading: priceLoading } = useQuery({
+    queryKey: ['price-recommendation', brandId, modelId, year, odometer, generationId],
+    queryFn: async () => {
+      // Don't fetch if any required field is missing
+      if (!brandId || !modelId || !year || !odometer) return null
+
+      try {
+        return await getPriceRecommendation({
+          brand_id: brandId,
+          model_id: modelId,
+          year,
+          odometer,
+          generation_id: generationId,
+        })
+      } catch (err) {
+        // Suppress 404 errors for price recommendation as it might not be available
+        const is404 = (err as { response?: { status?: number } })?.response?.status === 404
+        if (!is404) {
+          console.error('Price recommendation error:', err)
+        }
+        return null
+      }
+    },
+    enabled: !!brandId && !!modelId && !!year && odometer > 0,
+    retry: false,
+    staleTime: 60000,
+  })
+  const [, setInitializedFromEdit] = useState(false)
+  const queryClient = useQueryClient()
+
+  // Redirect if not authenticated
+  useEffect(() => {
+    if (!isAuthenticated) {
+      navigate('/')
+      openAuthModal()
+    }
+  }, [isAuthenticated, navigate, openAuthModal])
 
   // Fetch reference data
   const { data: brands = [] } = useQuery({
@@ -115,7 +163,7 @@ export function UserSell() {
 
   const { data: generations = [] } = useQuery({
     queryKey: ['generations', brandId, modelId, year, bodyTypeId, wheel],
-    queryFn: () => (brandId && modelId && year && bodyTypeId ? getGenerationsByModel(brandId, modelId, year, bodyTypeId, wheel) : Promise.resolve([])),
+    queryFn: () => (brandId && modelId && year && bodyTypeId && wheel !== undefined ? getGenerationsByModel(brandId, modelId, year, bodyTypeId, wheel) : Promise.resolve([])),
     enabled: !!brandId && !!modelId && !!year && !!bodyTypeId && wheel !== undefined,
     retry: 3,
     retryDelay: (attemptIndex) => Math.min(1000 * 2 ** attemptIndex, 30000),
@@ -125,7 +173,7 @@ export function UserSell() {
 
   // Prefetch generations
   useEffect(() => {
-    if (brandId && modelId && year && wheel !== undefined && bodyTypes.length > 0) {
+    if (brandId && modelId && year && bodyTypes.length > 0 && wheel !== undefined) {
       bodyTypes.forEach((bt) => {
         if (bodyTypes.length <= 5) {
           queryClient.prefetchQuery({
@@ -136,59 +184,83 @@ export function UserSell() {
         }
       })
     }
-  }, [brandId, modelId, year, wheel, bodyTypes, queryClient])
+  }, [brandId, modelId, year, bodyTypes, wheel, queryClient])
 
   // State for generation selection by name
   const [selectedGenerationName, setSelectedGenerationName] = useState<string>('')
 
-  // Sync selectedGenerationName
-  useEffect(() => {
-    if (generationId && generations.length > 0) {
-      const gen = generations.find((g) => g.id === generationId)
-      if (gen) {
-        setSelectedGenerationName(gen.name)
+  // Derived modifications from selected generation name
+  const modifications = useMemo(() => {
+    if (!selectedGenerationName || generations.length === 0) return []
+    
+    // Find all generation entries with the selected name
+    const matchingGenerations = generations.filter(g => g.name === selectedGenerationName)
+    
+    // Flatten modifications from all matching generations
+    // Attach the source generation_id to each modification so we can set it correctly later
+    const allMods: (Modification & { _genId: number })[] = []
+    
+    matchingGenerations.forEach(gen => {
+      if (gen.modifications && gen.modifications.length > 0) {
+        gen.modifications.forEach(mod => {
+          allMods.push({ ...mod, _genId: gen.id })
+        })
       }
-    } else if (!generationId) {
-        setSelectedGenerationName('')
+    })
+    
+    return allMods
+  }, [selectedGenerationName, generations])
+
+
+  // Sync selectedGenerationName
+  if (generationId && generations.length > 0) {
+    const gen = generations.find((g) => g.id === generationId)
+    if (gen && gen.name !== selectedGenerationName) {
+      setSelectedGenerationName(gen.name)
     }
-  }, [generationId, generations])
+  } else if (selectedGenerationName) {
+    // Only clear if the name is not found in the current list of generations
+    // AND generations list is not empty (meaning we have loaded data but the name is invalid)
+    if (generations.length > 0 && !generations.some(g => g.name === selectedGenerationName)) {
+      setSelectedGenerationName('')
+    }
+  }
 
   // Group generations
   const uniqueGenerationOptions = useMemo(() => {
     const unique = new Map()
     generations.forEach((g) => {
       if (!unique.has(g.name)) {
-        unique.set(g.name, { value: g.name, label: g.name })
+        unique.set(g.name, { 
+          id: g.id,
+          value: g.name, 
+          label: g.name,
+          image: g.image ? getImageUrl(g.image) : undefined
+        })
       }
     })
     return Array.from(unique.values())
   }, [generations])
 
-  // Get modifications
-  const modifications = useMemo(() => {
-    if (!selectedGenerationName) return []
-    const mods = generations
-      .filter((g) => g.name === selectedGenerationName)
-      .flatMap((g) => g.modifications || [])
-    const uniqueMods = new Map()
-    mods.forEach((m) => uniqueMods.set(m.id, m))
-    return Array.from(uniqueMods.values())
-  }, [generations, selectedGenerationName])
-
-  const handleGenerationChange = (name: string) => {
+  const handleGenerationChange = (_id: number, name: string) => {
     setSelectedGenerationName(name)
-    form.setValue('generation_id', undefined as unknown as number)
-    form.setValue('modification_id', undefined as unknown as number)
+    // We don't set generation_id here anymore because it depends on the specific modification selected
+    // (since one generation name can map to multiple generation IDs)
+    form.setValue('generation_id', undefined as unknown as number, { shouldDirty: true })
+    form.setValue('modification_id', undefined as unknown as number, { shouldDirty: true })
   }
 
   const handleModificationChange = (modId: number) => {
-    form.setValue('modification_id', modId)
-    const ownerGen = generations.find((g) => 
-      g.name === selectedGenerationName && 
-      g.modifications?.some((m) => m.id === modId)
-    )
-    if (ownerGen) {
-      form.setValue('generation_id', ownerGen.id)
+    form.setValue('modification_id', modId, { shouldDirty: true })
+
+    // Find the modification and its source generation ID
+    const mod = modifications.find(m => m.id === modId)
+    
+    if (mod) {
+      // Set the correct generation_id associated with this modification
+      if (mod._genId) {
+        form.setValue('generation_id', mod._genId, { shouldDirty: true })
+      }
     }
   }
 
@@ -212,8 +284,7 @@ export function UserSell() {
   // Populate form with edit data
   useEffect(() => {
     if (editData) {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const d = editData as any
+      const d = editData
       form.reset({
         brand_id: d.brand?.id,
         model_id: d.model?.id,
@@ -226,27 +297,44 @@ export function UserSell() {
         price: d.price,
         odometer: d.odometer,
         phone_numbers: d.phone_numbers,
-        trade_in: d.trade_in,
+        trade_in: d.trade_in ?? (d as { trade_id?: number }).trade_id ?? 0,
         vin_code: d.vin_code || '',
-        wheel: d.wheel,
+        wheel: d.wheel ?? true,
         crash: d.crash,
-        new: d.new,
+        new: false,
         owners: d.owners,
         description: d.description,
       })
-      setExistingImages(d.images || [])
-      setPhoneNumbers(d.phone_numbers || [''])
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+       setExistingImages((d.images || []).map(img => {
+        if (typeof img === 'string') return img
+        // Handle case where API might return objects
+        // @ts-expect-error - Handling inconsistent API response types
+        return img?.url || img?.path || img?.image || ''
+      }).filter(Boolean))
+      setPhoneNumbers(d.phone_numbers && d.phone_numbers.length > 0 ? d.phone_numbers : [''])
+      
+      // Set generation name if available
+      if (d.generation?.name) {
+        setSelectedGenerationName(d.generation.name)
+      } else if (typeof d.generation === 'string') {
+        setSelectedGenerationName(d.generation)
+      }
+      
+      setInitializedFromEdit(true)
     }
   }, [editData, form])
 
   // Resolve reference IDs
   useEffect(() => {
     if (!editData) return
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const d = editData as any
+    const d = editData
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const resolveId = (fieldName: any, value: any, list: any[]) => {
+    const resolveId = (
+      fieldName: keyof SellFormData,
+      value: { id?: number; name?: string } | string | null | undefined,
+      list: { id: number; name: string }[]
+    ) => {
       if (!value || list.length === 0) return
       const currentFormValue = form.getValues(fieldName)
       if (typeof value === 'string' && !currentFormValue) {
@@ -269,21 +357,54 @@ export function UserSell() {
     resolveId('model_id', d.model, models)
     resolveId('body_type_id', d.body_type, bodyTypes)
 
-    const genName = d.generation?.name || (typeof d.generation === 'string' ? d.generation : null)
-    if (genName && generations.length > 0) {
-      if (generations.some((g) => g.name === genName)) {
-        if (selectedGenerationName !== genName) {
-          setSelectedGenerationName(genName)
-        }
-      }
-    }
-    
-    if (modifications.length > 0) {
+    if (generations.length > 0) {
        const modValue = d.modification
        const currentModId = form.getValues('modification_id')
-       const idInList = modifications.some((m) => m.id === currentModId)
        
-       if (!idInList && modValue) {
+       // Check if current modification is visible in the filtered list
+       const inFilteredList = modifications.some((m) => m.id === currentModId)
+       
+       if (!inFilteredList) {
+          // Try to find the modification in ALL generations to recover correct generation selection
+          let foundGenName = ''
+          let foundModId = 0
+          
+          // Helper to check if a mod matches criteria
+          type ModValue = number | string | { id?: number; engine?: string; fuel_type?: string; transmission?: string; drivetrain?: string } | null | undefined
+          const isMatch = (m: Modification, val: ModValue) => {
+             if (currentModId && m.id === currentModId) return true
+             if (typeof val === 'number' && m.id === val) return true
+             if (typeof val === 'string' && m.name === val) return true
+             if (typeof val === 'object' && val) {
+                if (val.id && m.id === val.id) return true
+                if (val.engine && m.engine === val.engine && 
+                    val.fuel_type === m.fuel_type && 
+                    val.transmission === m.transmission && 
+                    val.drivetrain === m.drivetrain) return true
+             }
+             return false
+          }
+
+          for (const gen of generations) {
+             if (gen.modifications?.some(m => isMatch(m, modValue))) {
+                foundGenName = gen.name
+                const match = gen.modifications.find(m => isMatch(m, modValue))
+                if (match) foundModId = match.id
+                break
+             }
+          }
+
+          if (foundGenName) {
+             if (selectedGenerationName !== foundGenName) {
+                // eslint-disable-next-line react-hooks/set-state-in-effect
+                setSelectedGenerationName(foundGenName)
+             }
+             if (foundModId && foundModId !== currentModId) {
+                form.setValue('modification_id', foundModId)
+             }
+          }
+       } else if (modValue && !currentModId) {
+          // Standard resolution if not set but in list (e.g. matched by name)
           if (typeof modValue === 'string') {
              const found = modifications.find((m) => m.name === modValue)
              if (found) form.setValue('modification_id', found.id)
@@ -304,24 +425,46 @@ export function UserSell() {
   const createMutation = useMutation({
     mutationFn: createCar,
     onSuccess: async (result) => {
-      toast.success('Car listing created successfully!')
+      let hasErrors = false
       if (images.length > 0) {
         try {
-          await uploadCarImages(result.id, images)
-          toast.success('Images uploaded successfully!')
-        } catch (err: any) {
+          setLoadingMessage('Optimizing images...')
+          const compressedImages = await Promise.all(
+            images.map(file => compressImage(file))
+          )
+
+          setLoadingMessage('Uploading images...')
+          await uploadCarImages(result.id, compressedImages)
+        } catch (err) {
           console.error('Failed to upload images:', err)
-          const msg = err.response?.data?.error || err.response?.data?.message || err.message || 'Unknown error'
-          toast.error(`Failed to upload images: ${msg}`)
+          toast.error('Failed to upload images')
+          hasErrors = true
         }
       }
+
+      if (!hasErrors) {
+        toast.success('Car listing created successfully!')
+      }
+      setLoadingMessage(null)
+      queryClient.invalidateQueries({ queryKey: ['cars'] })
+      queryClient.invalidateQueries({ queryKey: ['car'] })
+      queryClient.invalidateQueries({ queryKey: ['my-cars'] })
+      queryClient.invalidateQueries({ queryKey: ['my-cars-on-sale'] })
+      queryClient.invalidateQueries({ queryKey: ['liked-cars'] })
       navigate(`/cars/${result.id}`)
     },
-    onError: (error: any) => {
+    onError: (error: unknown) => {
       console.error('Create car error:', error)
-      const msg = error.response?.data?.message || error.message || 'Failed to create listing'
+      const err = error as { response?: { data?: { message?: string | { ru?: string; en?: string; tk?: string } } } }
+      let msg = err.response?.data?.message || (error as Error).message || 'Failed to create listing'
+      
+      if (typeof msg === 'object' && msg !== null) {
+        msg = msg.ru || msg.en || msg.tk || JSON.stringify(msg)
+      }
+      
       setError(msg)
       toast.error(msg)
+      setLoadingMessage(null)
     },
   })
 
@@ -329,102 +472,117 @@ export function UserSell() {
   const updateMutation = useMutation({
     mutationFn: updateCar,
     onSuccess: async (_, variables) => {
-      toast.success('Car listing updated successfully!')
+      let hasErrors = false
       if (images.length > 0) {
         try {
-          await uploadCarImages(variables.id, images)
-          toast.success('New images uploaded successfully!')
-        } catch (err: any) {
-          console.error('Failed to upload images:', err)
-          const msg = err.response?.data?.error || err.response?.data?.message || err.message || 'Unknown error'
-          toast.error(`Failed to upload images: ${msg}`)
+          setLoadingMessage('Optimizing images...')
+          const compressedImages = await Promise.all(
+            images.map(file => compressImage(file))
+          )
+          setLoadingMessage('Uploading new images...')
+          await uploadCarImages(variables.id, compressedImages)
+        } catch (err) {
+          console.error('Update assets error:', err)
+          toast.error('Failed to upload new images')
+          hasErrors = true
         }
       }
+
+      if (pendingDeleteImages.length > 0) {
+        try {
+          setLoadingMessage('Removing images...')
+          await Promise.all(
+            pendingDeleteImages.map((imageUrl) => {
+              let path = imageUrl
+              try {
+                if (imageUrl.startsWith('http')) {
+                  const url = new URL(imageUrl)
+                  path = url.pathname
+              }
+            } catch {
+              // ignore
+            }
+              return deleteCarImage(variables.id, path)
+            })
+          )
+        } catch (err) {
+          console.error('Delete image error:', err)
+          toast.error('Failed to remove some images')
+          hasErrors = true
+        }
+      }
+
+      if (!hasErrors) {
+        toast.success('Car listing updated successfully!')
+      }
+      
+      setLoadingMessage(null)
+      setPendingDeleteImages([])
+      queryClient.invalidateQueries({ queryKey: ['cars'] })
+      queryClient.invalidateQueries({ queryKey: ['car'] })
+      queryClient.invalidateQueries({ queryKey: ['my-cars'] })
+      queryClient.invalidateQueries({ queryKey: ['my-cars-on-sale'] })
+      queryClient.invalidateQueries({ queryKey: ['liked-cars'] })
       navigate(`/cars/${variables.id}`)
     },
-    onError: (error: any) => {
+    onError: (error: unknown) => {
       console.error('Update car error:', error)
-      const msg = error.response?.data?.message || error.message || 'Failed to update listing'
+      const err = error as { response?: { data?: { message?: string | { ru?: string; en?: string; tk?: string } } } }
+      let msg = err.response?.data?.message || (error as Error).message || 'Failed to update listing'
+        
+      if (typeof msg === 'object' && msg !== null) {
+        msg = msg.ru || msg.en || msg.tk || JSON.stringify(msg)
+      }
+      
       setError(msg)
       toast.error(msg)
-    },
-  })
-
-  // Delete image mutation
-  const deleteImageMutation = useMutation({
-    mutationFn: ({ carId, imageUrl }: { carId: number; imageUrl: string }) =>
-      deleteCarImage(carId, imageUrl),
-    onSuccess: (_, variables) => {
-      setExistingImages((prev) => prev.filter((img) => img !== variables.imageUrl))
-      toast.success('Image deleted successfully')
-    },
-    onError: (error: any) => {
-      console.error('Delete image error:', error)
-      const msg = error.response?.data?.message || error.message || 'Failed to delete image'
-      toast.error(msg)
+      setLoadingMessage(null)
     },
   })
 
   // Resets
   useEffect(() => {
-    if (brandId) {
-      const isEditMode = !!editId
-      if (isEditMode && !editData) return
-      if (isEditMode && editData && brandId == editData.brand?.id) return
+    if (brandId && form.formState.dirtyFields.brand_id) {
       form.setValue('model_id', undefined as unknown as number)
       form.setValue('year', undefined as unknown as number)
       form.setValue('body_type_id', undefined as unknown as number)
       form.setValue('generation_id', undefined as unknown as number)
       form.setValue('modification_id', undefined as unknown as number)
     }
-  }, [brandId, form, editData, editId])
+  }, [brandId, form.formState.dirtyFields.brand_id, form])
 
   useEffect(() => {
-    if (modelId) {
-      const isEditMode = !!editId
-      if (isEditMode && !editData) return
-      if (isEditMode && editData && modelId == editData.model?.id) return
+    if (modelId && form.formState.dirtyFields.model_id) {
       form.setValue('year', undefined as unknown as number)
       form.setValue('body_type_id', undefined as unknown as number)
       form.setValue('generation_id', undefined as unknown as number)
       form.setValue('modification_id', undefined as unknown as number)
     }
-  }, [modelId, form, editData, editId])
+  }, [modelId, form.formState.dirtyFields.model_id, form])
 
   useEffect(() => {
-    const isEditMode = !!editId
-    if (isEditMode && !editData) return
-    if (isEditMode && editData && wheel == editData.wheel) return
-    if (wheel !== undefined) {
+    if (wheel !== undefined && form.formState.dirtyFields.wheel) {
       form.setValue('year', undefined as unknown as number)
       form.setValue('body_type_id', undefined as unknown as number)
       form.setValue('generation_id', undefined as unknown as number)
       form.setValue('modification_id', undefined as unknown as number)
     }
-  }, [wheel, form, editData, editId])
+  }, [wheel, form.formState.dirtyFields.wheel, form])
 
   useEffect(() => {
-    if (year) {
-      const isEditMode = !!editId
-      if (isEditMode && !editData) return
-      // eslint-disable-next-line eqeqeq
-      if (isEditMode && editData && year == editData.year) return
+    if (year && form.formState.dirtyFields.year) {
       form.setValue('body_type_id', undefined as unknown as number)
       form.setValue('generation_id', undefined as unknown as number)
       form.setValue('modification_id', undefined as unknown as number)
     }
-  }, [year, form, editData, editId])
+  }, [year, form.formState.dirtyFields.year, form])
 
   useEffect(() => {
-    if (bodyTypeId) {
-      const isEditMode = !!editId
-      if (isEditMode && !editData) return
-      // eslint-disable-next-line eqeqeq
-      if (isEditMode && editData && bodyTypeId == editData.body_type?.id) return
+    if (bodyTypeId && form.formState.dirtyFields.body_type_id) {
       form.setValue('generation_id', undefined as unknown as number)
       form.setValue('modification_id', undefined as unknown as number)
     }
-  }, [bodyTypeId, form, editData, editId])
+  }, [bodyTypeId, form.formState.dirtyFields.body_type_id, form])
 
   const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files || [])
@@ -461,22 +619,29 @@ export function UserSell() {
     setImages((prev) => prev.filter((_, i) => i !== index))
   }
 
-  const removeExistingImage = async (imageUrl: string) => {
-    if (editId) {
-      if (window.confirm('Are you sure you want to delete this image?')) {
-        let path = imageUrl
-        try {
-          if (imageUrl.startsWith('http')) {
-             const url = new URL(imageUrl)
-             path = url.pathname
-          }
-        } catch {
-          // Keep original
-        }
-        deleteImageMutation.mutate({ carId: Number(editId), imageUrl: path })
+  const removeExistingImage = (imageUrl: string) => {
+    if (!editId) return
+    console.log('[UserSell] removeExistingImage click', { editId, imageUrl })
+    setExistingImages((prev) => prev.filter((img) => img !== imageUrl))
+    let path = imageUrl
+    try {
+      if (imageUrl.startsWith('http')) {
+        const url = new URL(imageUrl)
+        const pathname = url.pathname
+        const imagesIndex = pathname.indexOf('/images/')
+        path = imagesIndex !== -1 ? pathname.slice(imagesIndex) : pathname
+      } else if (imageUrl.includes('/images/')) {
+        const imagesIndex = imageUrl.indexOf('/images/')
+        path = imageUrl.slice(imagesIndex)
       }
+    } catch (error) {
+      console.error('[UserSell] removeExistingImage URL parse error', { imageUrl, error })
     }
+    console.log('[UserSell] removeExistingImage normalized path', { editId, imageUrl, path })
+    setPendingDeleteImages((prev) => [...prev, path])
   }
+
+
 
   const addPhoneNumber = () => {
     if (phoneNumbers.length < 3) {
@@ -499,27 +664,50 @@ export function UserSell() {
     }
   }
 
-  const onSubmit: SubmitHandler<SellFormData> = (data) => {
+  const onSubmit = (data: SellFormData) => {
     setError(null)
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    const { generation_id, ...rest } = data
     
+    const validPhoneNumbers = data.phone_numbers.filter(p => p.trim())
+
+    // Find the modification to get technical specs
+    const selectedMod = modifications.find(m => m.id === data.modification_id)
+
+    // If generation_id is missing but we have a modification, try to find the correct generation_id
+    let generationId = data.generation_id
+    if (!generationId && selectedMod && selectedMod._genId) {
+      generationId = selectedMod._genId
+    }
+
+    // Extract technical specs from modification
+    const technicalSpecs = selectedMod ? {
+      transmission_id: selectedMod.transmission_id,
+      drivetrain_id: selectedMod.drivetrain_id,
+      engine_id: selectedMod.engine_id,
+      fuel_type_id: selectedMod.fuel_type_id,
+    } : {}
+
     if (editId) {
       // eslint-disable-next-line @typescript-eslint/no-unused-vars
-      const { body_type_id, vin_code, ...updateData } = rest
+      const { body_type_id, vin_code, new: _ignoredNew, ...updateData } = data
       const payload = {
         ...updateData,
+        ...technicalSpecs,
+        generation_id: generationId,
+        new: data.new || false,
         id: Number(editId),
-        phone_numbers: phoneNumbers.filter((p) => p.trim()),
+        phone_numbers: validPhoneNumbers,
+        owners: typeof data.owners === 'number' && !isNaN(data.owners) ? data.owners : 1,
       }
       updateMutation.mutate(payload)
     } else {
       const payload = {
-        ...rest,
-        crash: rest.crash || false,
-        new: rest.new || false,
-        owners: rest.owners || 1,
-        phone_numbers: phoneNumbers.filter((p) => p.trim()),
+        ...data,
+        ...technicalSpecs,
+        generation_id: generationId,
+        crash: data.crash || false,
+        new: data.new || false,
+        owners: data.owners || 1,
+        phone_numbers: validPhoneNumbers,
       }
       createMutation.mutate(payload)
     }
@@ -528,21 +716,416 @@ export function UserSell() {
   const isLoading = createMutation.isPending || updateMutation.isPending
 
   return (
-    <div className="container mx-auto px-4 py-8">
-      <div className="max-w-4xl mx-auto">
-        <h1 className="text-3xl font-bold mb-8">
-          {editId ? 'Edit Listing' : 'Sell Your Car'}
-        </h1>
+    <div className="container mx-auto px-4 py-8 max-w-3xl">
+      <h1 className="text-3xl font-bold mb-8 text-foreground">Sell your car</h1>
 
-        <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-8">
-          
-          <Card className="border-2 border-dashed border-border/60">
-            <CardHeader>
-              <CardTitle>Photos</CardTitle>
-              <CardDescription>Add up to 10 photos. First photo will be the main one.</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="grid grid-cols-3 sm:grid-cols-5 gap-4">
+      <div className="flex space-x-2 mb-8 overflow-x-auto pb-2 sm:pb-0">
+        <Button variant="secondary" className="bg-primary text-primary-foreground hover:bg-primary/90 whitespace-nowrap">Passenger cars</Button>
+        <Button variant="ghost" disabled className="text-muted-foreground opacity-50 cursor-not-allowed whitespace-nowrap">
+          Special machinery 
+          <span className="ml-2 text-[10px] bg-muted-foreground/20 px-1.5 py-0.5 rounded">Soon</span>
+        </Button>
+        <Button variant="ghost" disabled className="text-muted-foreground opacity-50 cursor-not-allowed whitespace-nowrap">
+          Motorcycles 
+          <span className="ml-2 text-[10px] bg-muted-foreground/20 px-1.5 py-0.5 rounded">Soon</span>
+        </Button>
+      </div>
+
+      <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
+        
+        {/* VIN */}
+        <div className="grid grid-cols-1 md:grid-cols-[200px_1fr] gap-4 items-center">
+          <Label className="text-muted-foreground">VIN or body number <span className="text-red-500">*</span></Label>
+          <div className="relative">
+            <Input 
+              {...form.register('vin_code')} 
+              placeholder="1MBG..." 
+              className="bg-background border-input text-foreground placeholder:text-muted-foreground focus-visible:ring-1 focus-visible:ring-ring"
+            />
+            {form.formState.errors.vin_code && (
+              <span className="text-red-500 text-sm absolute -bottom-5 left-0">{form.formState.errors.vin_code.message}</span>
+            )}
+          </div>
+        </div>
+
+        {/* Brand */}
+        <div className="grid grid-cols-1 md:grid-cols-[200px_1fr] gap-4 items-center">
+          <Label className="text-muted-foreground">Brand <span className="text-red-500">*</span></Label>
+          <Combobox
+            options={brands.map(b => ({ value: b.id, label: b.name }))}
+            value={brandId}
+            onChange={(val: string | number) => form.setValue('brand_id', val as number, { shouldDirty: true })}
+            placeholder="Select brand"
+            className="w-full"
+            triggerClassName="bg-background border-input text-foreground hover:bg-accent hover:text-accent-foreground focus:ring-1 focus:ring-ring"
+          />
+        </div>
+
+        {/* Model */}
+        <div className="grid grid-cols-1 md:grid-cols-[200px_1fr] gap-4 items-center">
+          <Label className="text-muted-foreground">Model <span className="text-red-500">*</span></Label>
+          <Combobox
+            options={models.map(m => ({ value: m.id, label: m.name }))}
+            value={modelId}
+            onChange={(val: string | number) => form.setValue('model_id', val as number, { shouldDirty: true })}
+            placeholder="Select model"
+            disabled={!brandId}
+            className="w-full"
+            triggerClassName="bg-background border-input text-foreground hover:bg-accent hover:text-accent-foreground focus:ring-1 focus:ring-ring"
+          />
+        </div>
+
+        {/* Steering Wheel */}
+        <div className="grid grid-cols-1 md:grid-cols-[200px_1fr] gap-4 items-center">
+          <Label className="text-muted-foreground">Steering wheel <span className="text-red-500">*</span></Label>
+          <div className="flex bg-muted p-1 rounded-md border border-input w-fit">
+            <button
+              type="button"
+              onClick={() => form.setValue('wheel', true, { shouldDirty: true })}
+              className={`px-6 py-2 rounded-sm text-sm transition-colors ${wheel === true ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
+            >
+              Left
+            </button>
+            <button
+              type="button"
+              onClick={() => form.setValue('wheel', false, { shouldDirty: true })}
+              className={`px-6 py-2 rounded-sm text-sm transition-colors ${wheel === false ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
+            >
+              Right
+            </button>
+          </div>
+        </div>
+
+        {/* Year */}
+        <div className="grid grid-cols-1 md:grid-cols-[200px_1fr] gap-4 items-center">
+          <Label className="text-muted-foreground">Year <span className="text-red-500">*</span></Label>
+          <Combobox
+            options={years.map(y => ({ value: y, label: y.toString() }))}
+            value={year}
+            onChange={(val: string | number) => form.setValue('year', val as number, { shouldDirty: true })}
+            placeholder="Select year"
+            disabled={!modelId}
+            className="w-full"
+            triggerClassName="bg-background border-input text-foreground hover:bg-accent hover:text-accent-foreground focus:ring-1 focus:ring-ring"
+          />
+        </div>
+
+        {/* Body Type */}
+        <div className="grid grid-cols-1 md:grid-cols-[200px_1fr] gap-4 items-start">
+          <Label className="text-muted-foreground pt-2">Body type <span className="text-red-500">*</span></Label>
+          {year ? (
+            bodyTypes.length > 0 ? (
+              <div className="flex flex-wrap gap-4">
+                {bodyTypes.map((bt) => (
+                  <div
+                    key={bt.id}
+                    onClick={() => form.setValue('body_type_id', bt.id, { shouldDirty: true })}
+                    className={`relative cursor-pointer flex flex-col items-center gap-2 p-4 rounded-lg transition-all border ${
+                      bodyTypeId === bt.id 
+                        ? 'bg-accent border-primary ring-1 ring-primary' 
+                        : 'bg-card border-border hover:bg-accent/50 hover:border-accent-foreground/20'
+                    }`}
+                  >
+                    {/* Assuming we might have icons later, for now just text */}
+                    {bt.image && <img src={getImageUrl(bt.image)} alt={bt.name} className="w-12 h-8 object-contain opacity-80" />}
+                    <span className="text-sm text-foreground">{bt.name}</span>
+                    {bodyTypeId === bt.id && (
+                      <div className="absolute top-2 right-2 w-5 h-5 rounded-full bg-primary flex items-center justify-center">
+                        <Check className="w-3 h-3 text-primary-foreground" />
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            ) : (
+               <div className="text-muted-foreground py-3 text-sm">No body types available for selected year</div>
+            )
+          ) : (
+            <div className="text-muted-foreground py-3 text-sm">Select year first</div>
+          )}
+        </div>
+
+        {/* Generation */}
+        <div className="grid grid-cols-1 md:grid-cols-[200px_1fr] gap-4 items-start">
+          <Label className="text-muted-foreground pt-2">Generation</Label>
+          {bodyTypeId ? (
+            uniqueGenerationOptions.length > 0 ? (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 w-full">
+                {uniqueGenerationOptions.map((gen) => (
+                  <div
+                    key={gen.value}
+                    onClick={() => handleGenerationChange(gen.id, gen.value)}
+                    className={`relative cursor-pointer rounded-xl overflow-hidden transition-all group border ${
+                      selectedGenerationName === gen.value
+                        ? 'bg-accent border-primary ring-1 ring-primary'
+                        : 'bg-card border-border hover:bg-accent/50 hover:border-accent-foreground/20'
+                    }`}
+                  >
+                    <div className="aspect-video bg-muted relative">
+                      {gen.image ? (
+                        <img src={gen.image} alt={gen.label} className="w-full h-full object-cover" />
+                      ) : (
+                        <div className="w-full h-full flex items-center justify-center text-muted-foreground text-xs">No Photo</div>
+                      )}
+                      {/* Gradient overlay for text readability - mostly for dark mode or dark images */}
+                      <div className="absolute inset-x-0 bottom-0 h-16 bg-gradient-to-t from-black/80 to-transparent" />
+                    </div>
+                    <div className="p-4 bg-card border-t border-border">
+                      <div className="text-base font-medium text-foreground">{gen.label}</div>
+                    </div>
+                    {selectedGenerationName === gen.value && (
+                      <div className="absolute bottom-3 right-3 w-6 h-6 rounded-full bg-primary flex items-center justify-center z-10">
+                        <Check className="w-4 h-4 text-primary-foreground" />
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            ) : (
+               <div className="text-muted-foreground py-3 text-sm">No generations available</div>
+            )
+          ) : (
+             <div className="text-muted-foreground py-3 text-sm">Select body type first</div>
+          )}
+        </div>
+
+        {/* Modification */}
+        <div className="grid grid-cols-1 md:grid-cols-[200px_1fr] gap-4 items-start">
+          <Label className="text-muted-foreground pt-2">Modification</Label>
+          {selectedGenerationName ? (
+            modifications.length > 0 ? (
+              <div className="flex flex-col gap-3 w-full">
+                {modifications.map((mod) => {
+                   // Construct detailed label
+                   const details = [
+                     mod.engine,
+                     mod.fuel_type,
+                     mod.transmission,
+                     mod.drivetrain
+                   ].filter(Boolean).join(', ')
+                   
+                   const label = details ? details : mod.name
+  
+                   return (
+                    <button
+                      key={mod.id}
+                      type="button"
+                      onClick={() => handleModificationChange(mod.id)}
+                      className={`relative text-left px-6 py-3 rounded-full transition-all text-sm flex items-center justify-between border ${
+                        modificationId === mod.id
+                          ? 'bg-primary text-primary-foreground border-primary'
+                          : 'bg-card text-foreground border-border hover:bg-accent'
+                      }`}
+                    >
+                      <span>{label}</span>
+                      {modificationId === mod.id && (
+                         <div className="w-5 h-5 rounded-full bg-primary-foreground flex items-center justify-center flex-shrink-0 ml-2">
+                           <Check className="w-3 h-3 text-primary" />
+                         </div>
+                      )}
+                    </button>
+                   )
+                })}
+              </div>
+            ) : (
+               <div className="text-muted-foreground py-3 text-sm">No modifications available</div>
+            )
+          ) : (
+             <div className="text-muted-foreground py-3 text-sm">Select generation first</div>
+          )}
+        </div>
+
+
+
+        {/* Mileage */}
+        <div className="grid grid-cols-1 md:grid-cols-[200px_1fr] gap-4 items-center">
+          <Label className="text-muted-foreground">Mileage <span className="text-red-500">*</span></Label>
+          <div className="relative">
+            <Input 
+              type="number"
+              {...form.register('odometer', { valueAsNumber: true })} 
+              className="bg-background border-input text-foreground pr-10 focus-visible:ring-1 focus-visible:ring-ring"
+            />
+            <span className="absolute right-3 top-2.5 text-muted-foreground text-sm">km</span>
+          </div>
+        </div>
+
+        {/* Owners */}
+        <div className="grid grid-cols-1 md:grid-cols-[200px_1fr] gap-4 items-center">
+          <Label className="text-muted-foreground">Number of owners <span className="text-red-500">*</span></Label>
+          <div className="flex flex-wrap gap-2">
+            {[1, 2, 3, 4].map((num) => (
+              <button
+                key={num}
+                type="button"
+                onClick={() => form.setValue('owners', num)}
+                className={`px-4 py-2 rounded-full text-sm transition-all flex items-center gap-2 border ${
+                  (owners || 1) === num
+                    ? 'bg-primary text-primary-foreground border-primary'
+                    : 'bg-card text-muted-foreground border-border hover:bg-accent hover:text-foreground'
+                }`}
+              >
+                <span>{num === 4 ? '4+' : num === 1 ? 'One' : num === 2 ? 'Two' : 'Three'}</span>
+                {(owners || 1) === num && (
+                  <div className="w-4 h-4 rounded-full bg-primary-foreground flex items-center justify-center">
+                    <Check className="w-2.5 h-2.5 text-primary" />
+                  </div>
+                )}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Accident */}
+        <div className="grid grid-cols-1 md:grid-cols-[200px_1fr] gap-4 items-center">
+          <Label className="text-muted-foreground">Damaged / Accident</Label>
+          <div className="flex bg-muted p-1 rounded-md border border-input w-fit">
+             <button
+                type="button"
+                onClick={() => form.setValue('crash', true)}
+                className={`px-6 py-2 rounded-sm text-sm transition-colors ${isCrash === true ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
+             >
+                Yes
+             </button>
+             <button
+                type="button"
+                onClick={() => form.setValue('crash', false)}
+                className={`px-6 py-2 rounded-sm text-sm transition-colors ${isCrash === false ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
+             >
+                No
+             </button>
+          </div>
+        </div>
+
+        {/* Color */}
+        <div className="grid grid-cols-1 md:grid-cols-[200px_1fr] gap-4 items-center">
+          <Label className="text-muted-foreground">Color</Label>
+          <Combobox
+            options={colors.map(c => ({ value: c.id, label: c.name }))}
+            value={colorId}
+            onChange={(val: string | number) => form.setValue('color_id', val as number)}
+            placeholder="Select color"
+            className="w-full"
+            triggerClassName="bg-background border-input text-foreground hover:bg-accent hover:text-accent-foreground focus:ring-1 focus:ring-ring"
+          />
+        </div>
+
+
+
+
+        {/* Price */}
+        <div className="grid grid-cols-1 md:grid-cols-[200px_1fr] gap-4 items-start">
+          <Label className="text-muted-foreground pt-3">Price <span className="text-red-500">*</span></Label>
+          <div className="flex flex-col gap-4 w-full">
+            <div className="relative">
+              <Input 
+                type="number"
+                {...form.register('price', { valueAsNumber: true })} 
+                className="bg-background border-input text-foreground pr-12 focus-visible:ring-1 focus-visible:ring-ring"
+              />
+              <span className="absolute right-3 top-2.5 text-muted-foreground text-sm">$</span>
+            </div>
+            
+            <div className="flex justify-end">
+              {priceLoading ? (
+                <div className="text-xs text-muted-foreground flex items-center gap-2">
+                  <Spinner className="w-3 h-3" />
+                  <span>Estimating price...</span>
+                </div>
+              ) : priceSuggestion && (
+                <div className="text-xs text-muted-foreground">
+                  Average price for this car: ${priceSuggestion.avg_price.toLocaleString()}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {/* Trade In */}
+        <div className="grid grid-cols-1 md:grid-cols-[200px_1fr] gap-4 items-center">
+           <Label className="text-muted-foreground">Trade-in</Label>
+           <Combobox
+              options={TRADE_IN_OPTIONS}
+              value={tradeIn}
+              onChange={(val: string | number) => form.setValue('trade_in', val as number)}
+              placeholder="Select trade-in option"
+              className="w-full"
+              triggerClassName="bg-background border-input text-foreground hover:bg-accent hover:text-accent-foreground focus:ring-1 focus:ring-ring"
+           />
+        </div>
+
+
+
+
+        {/* City */}
+        <div className="grid grid-cols-1 md:grid-cols-[200px_1fr] gap-4 items-center">
+          <Label className="text-muted-foreground">City <span className="text-red-500">*</span></Label>
+          <Combobox
+            options={cities.map(c => ({ value: c.id, label: c.name }))}
+            value={cityId}
+            onChange={(val: string | number) => form.setValue('city_id', val as number)}
+            placeholder="Select city"
+            className="w-full"
+            triggerClassName="bg-background border-input text-foreground hover:bg-accent hover:text-accent-foreground focus:ring-1 focus:ring-ring"
+          />
+        </div>
+
+        {/* Phone Numbers */}
+        <div className="grid grid-cols-1 md:grid-cols-[200px_1fr] gap-4 items-start">
+          <Label className="text-muted-foreground pt-3">Contacts <span className="text-red-500">*</span></Label>
+          <div className="space-y-3">
+            {phoneNumbers.map((phone, index) => (
+              <div key={index} className="flex gap-2">
+                <Input
+                  value={phone}
+                  onChange={(e) => updatePhoneNumber(index, e.target.value)}
+                  placeholder="+993..."
+                  className="bg-background border-input text-foreground focus-visible:ring-1 focus-visible:ring-ring"
+                />
+                {phoneNumbers.length > 1 && (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    onClick={() => removePhoneNumber(index)}
+                    className="text-muted-foreground hover:text-destructive hover:bg-destructive/10 px-3"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                )}
+              </div>
+            ))}
+            {phoneNumbers.length < 3 && (
+              <Button
+                type="button"
+                variant="outline"
+                onClick={addPhoneNumber}
+                className="text-sm border-input text-muted-foreground hover:text-foreground hover:bg-accent"
+              >
+                <Plus className="h-4 w-4 mr-2" /> Add number
+              </Button>
+            )}
+            {form.formState.errors.phone_numbers && (
+               <p className="text-red-500 text-sm">{form.formState.errors.phone_numbers.message}</p>
+            )}
+          </div>
+        </div>
+
+        {/* Description */}
+        <div className="grid grid-cols-1 md:grid-cols-[200px_1fr] gap-4 items-start">
+          <Label className="text-muted-foreground pt-3">Description</Label>
+          <Textarea
+            {...form.register('description')}
+            placeholder="Describe car condition, configuration, extra options..."
+            className="min-h-[150px] bg-background border-input text-foreground placeholder:text-muted-foreground resize-y focus-visible:ring-1 focus-visible:ring-ring"
+          />
+        </div>
+
+        {/* Photos & Videos */}
+        <div className="pt-6 border-t border-border space-y-8">
+          {/* Images Section */}
+          <div>
+            <h3 className="text-lg font-medium text-foreground mb-4">Photos</h3>
+            <div className="grid grid-cols-3 sm:grid-cols-5 gap-4">
                 {existingImages.map((imageUrl, index) => (
                   <div key={`existing-${index}`} className="relative aspect-square group">
                     <img
@@ -577,326 +1160,42 @@ export function UserSell() {
                   </div>
                 ))}
 
-                {existingImages.length + images.length < 10 && (
-                  <label className="aspect-square border-2 border-dashed border-border rounded-lg flex flex-col items-center justify-center cursor-pointer hover:border-primary hover:bg-muted/50 transition-colors">
-                    <Upload className="h-6 w-6 text-muted-foreground mb-2" />
-                    <span className="text-xs text-muted-foreground font-medium">Add photo</span>
+                {(existingImages.length + images.length) < 20 && (
+                  <label className="relative aspect-square rounded-lg border-2 border-dashed border-muted-foreground/25 hover:border-muted-foreground/50 cursor-pointer flex flex-col items-center justify-center gap-2 transition-colors">
+                    <Upload className="h-6 w-6 text-muted-foreground" />
+                    <span className="text-xs text-muted-foreground">Add photo</span>
                     <input
                       type="file"
-                      accept="image/*"
+                      accept="image/jpeg,image/png"
                       multiple
                       className="hidden"
                       onChange={handleImageChange}
                     />
                   </label>
                 )}
-              </div>
-            </CardContent>
-          </Card>
+            </div>
+          </div>
+        </div>
 
-          <Card>
-            <CardHeader>
-              <CardTitle>Vehicle Details</CardTitle>
-              <CardDescription>Enter the core specifications of your vehicle.</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-6">
-              
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
-                <div className="space-y-2">
-                  <Label>Brand *</Label>
-                  <Combobox
-                    options={brands.map((b) => ({ value: b.id, label: b.name, image: getImageUrl(b.logo) }))}
-                    placeholder="Select brand"
-                    searchPlaceholder="Search brand..."
-                    value={brandId}
-                    onChange={(val) => form.setValue('brand_id', Number(val))}
-                  />
-                  {form.formState.errors.brand_id && (
-                    <p className="text-sm text-destructive">{form.formState.errors.brand_id.message}</p>
-                  )}
-                </div>
-
-                <div className="space-y-2">
-                  <Label>Model *</Label>
-                  <Combobox
-                    options={models.map((m) => ({ value: m.id, label: m.name }))}
-                    placeholder="Select model"
-                    searchPlaceholder="Search model..."
-                    value={modelId}
-                    onChange={(val) => form.setValue('model_id', Number(val))}
-                    disabled={!brandId}
-                  />
-                  {form.formState.errors.model_id && (
-                    <p className="text-sm text-destructive">{form.formState.errors.model_id.message}</p>
-                  )}
-                </div>
-
-                <div className="space-y-2">
-                  <Label>Year *</Label>
-                  <Combobox
-                    options={years.map((y) => ({ value: y, label: String(y) }))}
-                    placeholder="Select year"
-                    searchPlaceholder="Search year..."
-                    value={year}
-                    onChange={(val) => form.setValue('year', Number(val))}
-                    disabled={!modelId}
-                  />
-                  {form.formState.errors.year && (
-                    <p className="text-sm text-destructive">{form.formState.errors.year.message}</p>
-                  )}
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
-                <div className="space-y-2">
-                  <Label>Steering Wheel *</Label>
-                  <div className="flex gap-4">
-                     <Button
-                        type="button"
-                        variant={wheel === true ? 'default' : 'outline'}
-                        className="flex-1"
-                        onClick={() => form.setValue('wheel', true)}
-                     >
-                        Left
-                     </Button>
-                     <Button
-                        type="button"
-                        variant={wheel === false ? 'default' : 'outline'}
-                        className="flex-1"
-                        onClick={() => form.setValue('wheel', false)}
-                     >
-                        Right
-                     </Button>
-                  </div>
-                </div>
-
-                <div className="space-y-2">
-                  <Label>Body Type *</Label>
-                   <Combobox
-                        options={bodyTypes.map((bt) => ({ value: bt.id, label: bt.name }))}
-                        placeholder="Select body type"
-                        searchPlaceholder="Search..."
-                        value={bodyTypeId}
-                        onChange={(val) => form.setValue('body_type_id', Number(val))}
-                        disabled={!year}
-                     />
-                  {form.formState.errors.body_type_id && (
-                    <p className="text-sm text-destructive">{form.formState.errors.body_type_id.message}</p>
-                  )}
-                </div>
-
-                <div className="space-y-2">
-                  <Label>Generation *</Label>
-                   <Combobox
-                        options={uniqueGenerationOptions}
-                        placeholder="Select generation"
-                        searchPlaceholder="Search generation..."
-                        value={selectedGenerationName}
-                        onChange={(val) => handleGenerationChange(String(val))}
-                        disabled={!bodyTypeId}
-                     />
-                  {form.formState.errors.generation_id && (
-                    <p className="text-sm text-destructive">{form.formState.errors.generation_id.message}</p>
-                  )}
-                </div>
-              </div>
-
-               <div className="grid grid-cols-1 gap-6">
-                 <div className="space-y-2">
-                    <Label>Modification *</Label>
-                    <div className="grid grid-cols-1 gap-2">
-                       {modifications.map((mod) => (
-                          <div 
-                             key={mod.id}
-                             className={`p-3 border rounded-lg cursor-pointer hover:border-primary transition-colors ${modificationId === mod.id ? 'border-primary bg-primary/5' : 'border-border'}`}
-                             onClick={() => handleModificationChange(mod.id)}
-                          >
-                             <div className="font-medium">{mod.engine || 'Unknown Engine'} {mod.fuel_type}</div>
-                             <div className="text-sm text-muted-foreground">
-                                {mod.transmission} • {mod.drivetrain} • {mod.horse_power ? `${mod.horse_power} hp` : ''}
-                             </div>
-                          </div>
-                       ))}
-                       {modifications.length === 0 && selectedGenerationName && (
-                          <p className="text-sm text-muted-foreground">No modifications found.</p>
-                       )}
-                    </div>
-                     {form.formState.errors.modification_id && (
-                    <p className="text-sm text-destructive">{form.formState.errors.modification_id.message}</p>
-                  )}
-                 </div>
-               </div>
-
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader>
-              <CardTitle>Details & Price</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-6">
-               <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
-                  <div className="space-y-2">
-                     <Label>City *</Label>
-                     <Combobox
-                        options={cities.map((c) => ({ value: c.id, label: c.name }))}
-                        placeholder="Select city"
-                        searchPlaceholder="Search city..."
-                        value={cityId}
-                        onChange={(val) => form.setValue('city_id', Number(val))}
-                     />
-                     {form.formState.errors.city_id && (
-                        <p className="text-sm text-destructive">{form.formState.errors.city_id.message}</p>
-                     )}
-                  </div>
-
-                  <div className="space-y-2">
-                     <Label>Color *</Label>
-                     <Combobox
-                        options={colors.map((c) => ({ value: c.id, label: c.name }))}
-                        placeholder="Select color"
-                        searchPlaceholder="Search color..."
-                        value={colorId}
-                        onChange={(val) => form.setValue('color_id', Number(val))}
-                     />
-                     {form.formState.errors.color_id && (
-                        <p className="text-sm text-destructive">{form.formState.errors.color_id.message}</p>
-                     )}
-                  </div>
-
-                  <div className="space-y-2">
-                     <Label>Mileage (km) *</Label>
-                     <Input
-                        type="number"
-                        placeholder="e.g. 50000"
-                        {...form.register('odometer', { valueAsNumber: true })}
-                     />
-                     {form.formState.errors.odometer && (
-                        <p className="text-sm text-destructive">{form.formState.errors.odometer.message}</p>
-                     )}
-                  </div>
-
-                  <div className="space-y-2">
-                     <Label>Price (USD) *</Label>
-                     <Input
-                        type="number"
-                        placeholder="e.g. 15000"
-                        {...form.register('price', { valueAsNumber: true })}
-                     />
-                     {form.formState.errors.price && (
-                        <p className="text-sm text-destructive">{form.formState.errors.price.message}</p>
-                     )}
-                  </div>
-               </div>
-               
-               <div className="space-y-2">
-                  <Label>VIN Code *</Label>
-                  <Input
-                     placeholder="Enter VIN code"
-                     {...form.register('vin_code')}
-                     className="uppercase"
-                     maxLength={17}
-                  />
-                  {form.formState.errors.vin_code && (
-                     <p className="text-sm text-destructive">{form.formState.errors.vin_code.message}</p>
-                  )}
-               </div>
-
-               <div className="space-y-2">
-                  <Label>Description</Label>
-                  <textarea
-                     className="flex min-h-[80px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
-                     placeholder="Tell us more about your car..."
-                     rows={5}
-                     {...form.register('description')}
-                  />
-               </div>
-
-               <div className="flex flex-col gap-4 sm:flex-row">
-                  <div className="flex items-center space-x-2 border p-4 rounded-lg flex-1">
-                     <input
-                        type="checkbox"
-                        id="trade_in"
-                        checked={tradeIn === 1}
-                        onChange={(e) => form.setValue('trade_in', e.target.checked ? 1 : 0)}
-                        className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary"
-                     />
-                     <Label htmlFor="trade_in" className="cursor-pointer">Trade-in available</Label>
-                  </div>
-               </div>
-
-            </CardContent>
-          </Card>
-
-          <Card>
-             <CardHeader>
-                <CardTitle>Contact Information</CardTitle>
-             </CardHeader>
-             <CardContent>
-                <div className="space-y-4">
-                   <Label>Phone Numbers *</Label>
-                   {phoneNumbers.map((phone, index) => (
-                      <div key={index} className="flex gap-2">
-                         <Input
-                            value={phone}
-                            onChange={(e) => updatePhoneNumber(index, e.target.value)}
-                            placeholder="+993 6X XX XX XX"
-                         />
-                         {phoneNumbers.length > 1 && (
-                            <Button
-                               type="button"
-                               variant="ghost"
-                               size="icon"
-                               onClick={() => removePhoneNumber(index)}
-                            >
-                               <X className="h-4 w-4" />
-                            </Button>
-                         )}
-                      </div>
-                   ))}
-                   {phoneNumbers.length < 3 && (
-                      <Button
-                         type="button"
-                         variant="outline"
-                         size="sm"
-                         onClick={addPhoneNumber}
-                         className="mt-2"
-                      >
-                         <Plus className="h-4 w-4 mr-2" />
-                         Add Phone Number
-                      </Button>
-                   )}
-                   {form.formState.errors.phone_numbers && (
-                      <p className="text-sm text-destructive">{form.formState.errors.phone_numbers.message}</p>
-                   )}
-                </div>
-             </CardContent>
-          </Card>
-
+        {/* Submit */}
+        <div className="pt-6">
+          <Button 
+            type="submit" 
+            disabled={isLoading}
+            className="w-full bg-green-600 hover:bg-green-700 text-white py-6 text-lg"
+          >
+            {isLoading ? <Spinner className="mr-2" /> : null}
+            {loadingMessage ? loadingMessage : (editId ? 'Save changes' : 'Publish listing')}
+          </Button>
           {error && (
-            <div className="bg-destructive/10 text-destructive p-4 rounded-lg flex items-center gap-2">
+            <div className="mt-4 p-4 bg-red-900/20 border border-red-900 rounded-lg flex items-center gap-2 text-red-500">
               <AlertCircle className="h-5 w-5" />
-              <p>{error}</p>
+              <span>{error}</span>
             </div>
           )}
+        </div>
 
-          <div className="flex justify-end gap-4">
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() => navigate(-1)}
-              disabled={isLoading}
-            >
-              Cancel
-            </Button>
-            <Button type="submit" disabled={isLoading} size="lg">
-              {isLoading && <Spinner className="mr-2 h-4 w-4" />}
-              {editId ? 'Save Changes' : 'Create Listing'}
-            </Button>
-          </div>
-
-        </form>
-      </div>
+      </form>
     </div>
   )
 }

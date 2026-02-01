@@ -19,18 +19,19 @@ export interface CarsFilters {
   year_to?: number
   price_from?: number
   price_to?: number
-  odometer_from?: number
-  odometer_to?: number
+  odometer?: number
   body_type_id?: number
   transmission_id?: number
   fuel_type_id?: number
   drivetrain_id?: number
   engine_id?: number
   color_id?: number
+  posted_by?: 'dealer' | 'private'
+  wheel?: boolean
   new?: boolean
   crash?: boolean
   trade_in?: number
-  q?: string
+  owners?: number
   limit?: number
   last_id?: number
   user_id?: number
@@ -70,23 +71,22 @@ export async function getCars(filters?: CarsFilters): Promise<CarsResponse> {
     if (filters.year_to) params.append('year_to', String(filters.year_to))
 
     // Ranges
-    if (filters.price_from) params.append('price_from', String(filters.price_from))
-    if (filters.price_to) params.append('price_to', String(filters.price_to))
-    if (filters.odometer_from) params.append('odometer_from', String(filters.odometer_from))
-    if (filters.odometer_to) params.append('odometer_to', String(filters.odometer_to))
+    if (filters.price_from !== undefined) params.append('price_from', String(filters.price_from))
+    if (filters.price_to !== undefined) params.append('price_to', String(filters.price_to))
+    if (filters.odometer !== undefined) params.append('odometer', String(filters.odometer))
 
     // Booleans
+    if (filters.wheel !== undefined) params.append('wheel', String(filters.wheel))
     if (filters.new) params.append('new', 'true')
     if (filters.crash) params.append('crash', 'true')
-    // if (filters.trade_in) params.append('trade_in', String(filters.trade_in))
-
-    // Search
-    if (filters.q) params.append('q', filters.q)
+    if (filters.trade_in !== undefined) params.append('trade_in', String(filters.trade_in))
+    if (filters.owners !== undefined) params.append('owners', String(filters.owners))
 
     // Pagination
     if (filters.limit) params.append('limit', String(filters.limit))
     if (filters.last_id) params.append('last_id', String(filters.last_id))
-    if (filters.user_id) params.append('user_id', String(filters.user_id))
+    // Backend uses 'dealers' param to filter by user_id (user_id param is ignored)
+    if (filters.user_id) params.append('dealers', String(filters.user_id))
   }
 
   const response = await apiClient.get('/api/v1/users/cars', { params })
@@ -148,7 +148,7 @@ export async function uploadCarImages(carId: number, files: File[]): Promise<Suc
   const response = await apiClient.post(`/api/v1/users/cars/${carId}/images`, formData, {
     headers: {
       'Content-Type': undefined,
-    } as any,
+    } as Record<string, string | undefined>,
   })
   return response.data
 }
@@ -169,7 +169,7 @@ export async function uploadCarVideo(carId: number, file: File): Promise<Success
   const response = await apiClient.post(`/api/v1/users/cars/${carId}/videos`, formData, {
     headers: {
       'Content-Type': undefined,
-    } as any,
+    } as unknown as Record<string, string>,
   })
   return response.data
 }
@@ -212,6 +212,7 @@ export async function getPriceRecommendation(params: {
   model_id: number
   year: number
   odometer: number
+  generation_id?: number
 }): Promise<{ min_price: number; max_price: number; avg_price: number }> {
   const response = await apiClient.get('/api/v1/users/cars/price-recommendation', { params })
   return response.data

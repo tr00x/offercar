@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { useForm, useWatch, type SubmitHandler } from 'react-hook-form'
+import { useForm, useWatch, type Resolver } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
@@ -11,7 +11,7 @@ import { Label } from '@/components/ui/label'
 import { Combobox } from '@/components/ui/combobox'
 import { Spinner } from '@/components/ui/spinner'
 import { useAuth } from '@/store/auth'
-import { createDealerCar, updateDealerCar, uploadDealerCarImages, getDealerCarEditData, deleteDealerCarImage, uploadDealerCarVideo, deleteDealerCarVideo } from '@/api/dealer'
+import { createDealerCar, updateDealerCar, uploadDealerCarImages, getDealerCarEditData, deleteDealerCarImage } from '@/api/dealer'
 import { getImageUrl } from '@/api/client'
 import {
   getBrands,
@@ -24,6 +24,8 @@ import {
 } from '@/api/references'
 import { Plus, X, Upload, AlertCircle } from 'lucide-react'
 import toast from 'react-hot-toast'
+import type { Modification } from '@/types'
+import { getErrorMessage } from '@/lib/utils'
 
 const sellSchema = z.object({
   brand_id: z.number({ message: 'Please select a brand' }),
@@ -48,15 +50,18 @@ const sellSchema = z.object({
 
 type SellFormData = z.infer<typeof sellSchema>
 
-export function DealerSell() {
+type DealerSellProps = {
+  editId?: string | null
+  onSuccess?: () => void
+}
+
+export function DealerSell(props: DealerSellProps = {}) {
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
-  const editId = searchParams.get('editId')
-  const { isAuthenticated } = useAuth()
+  const editId = props.editId ?? searchParams.get('editId')
+  const { isAuthenticated, openAuthModal } = useAuth()
   const [images, setImages] = useState<File[]>([])
   const [existingImages, setExistingImages] = useState<string[]>([])
-  const [existingVideos, setExistingVideos] = useState<string[]>([])
-  const [videoUploading, setVideoUploading] = useState(false)
   const [phoneNumbers, setPhoneNumbers] = useState<string[]>([''])
   const [error, setError] = useState<string | null>(null)
   const queryClient = useQueryClient()
@@ -64,13 +69,13 @@ export function DealerSell() {
   // Redirect if not authenticated
   useEffect(() => {
     if (!isAuthenticated) {
-      navigate('/auth', { state: { from: '/biz/dealer/new' } })
+      navigate('/')
+      openAuthModal()
     }
-  }, [isAuthenticated, navigate])
+  }, [isAuthenticated, navigate, openAuthModal])
 
   const form = useForm<SellFormData>({
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    resolver: zodResolver(sellSchema) as any,
+    resolver: zodResolver(sellSchema) as unknown as Resolver<SellFormData>,
     defaultValues: {
       trade_in: 1,
       wheel: true,
@@ -150,6 +155,7 @@ export function DealerSell() {
     if (generationId && generations.length > 0) {
       const gen = generations.find((g) => g.id === generationId)
       if (gen) {
+        // eslint-disable-next-line react-hooks/set-state-in-effect
         setSelectedGenerationName(gen.name)
       }
     } else if (!generationId) {
@@ -162,7 +168,11 @@ export function DealerSell() {
     const unique = new Map()
     generations.forEach((g) => {
       if (!unique.has(g.name)) {
-        unique.set(g.name, { value: g.name, label: g.name })
+        unique.set(g.name, { 
+          value: g.name, 
+          label: g.name,
+          image: g.image ? getImageUrl(g.image) : undefined
+        })
       }
     })
     return Array.from(unique.values())
@@ -181,18 +191,18 @@ export function DealerSell() {
 
   const handleGenerationChange = (name: string) => {
     setSelectedGenerationName(name)
-    form.setValue('generation_id', undefined as unknown as number)
-    form.setValue('modification_id', undefined as unknown as number)
+    form.setValue('generation_id', undefined as unknown as number, { shouldDirty: true })
+    form.setValue('modification_id', undefined as unknown as number, { shouldDirty: true })
   }
 
   const handleModificationChange = (modId: number) => {
-    form.setValue('modification_id', modId)
+    form.setValue('modification_id', modId, { shouldDirty: true })
     const ownerGen = generations.find((g) => 
       g.name === selectedGenerationName && 
       g.modifications?.some((m) => m.id === modId)
     )
     if (ownerGen) {
-      form.setValue('generation_id', ownerGen.id)
+      form.setValue('generation_id', ownerGen.id, { shouldDirty: true })
     }
   }
 
@@ -216,8 +226,7 @@ export function DealerSell() {
   // Populate form
   useEffect(() => {
     if (editData) {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const d = editData as any
+      const d = editData
       form.reset({
         brand_id: d.brand?.id,
         model_id: d.model?.id,
@@ -230,28 +239,42 @@ export function DealerSell() {
         price: d.price,
         odometer: d.odometer,
         phone_numbers: d.phone_numbers,
-        trade_in: d.trade_in ?? d.trade_id ?? 0,
+        trade_in: d.trade_in ?? (d as { trade_id?: number }).trade_id ?? 0,
         vin_code: d.vin_code || '',
-        wheel: d.wheel,
+        wheel: d.wheel ?? true,
         crash: d.crash,
         new: d.new,
         owners: d.owners,
         description: d.description,
       })
-      setExistingImages(d.images || [])
-      setExistingVideos(d.videos || [])
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setExistingImages((d.images || []).map(img => {
+        if (typeof img === 'string') return img
+        // Handle case where API might return objects
+        // @ts-expect-error - Handling inconsistent API response types
+        return img?.url || img?.path || img?.image || ''
+      }).filter(Boolean))
+
       setPhoneNumbers(d.phone_numbers || [''])
+      
+      // Set generation name if available
+      const genName = d.generation?.name || (typeof d.generation === 'string' ? d.generation : null)
+      if (genName) {
+        setSelectedGenerationName(genName)
+      }
     }
   }, [editData, form])
 
   // Resolve reference IDs
   useEffect(() => {
     if (!editData) return
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const d = editData as any
+    const d = editData
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const resolveId = (fieldName: any, value: any, list: any[]) => {
+    const resolveId = (
+      fieldName: keyof SellFormData,
+      value: { id?: number; name?: string } | string | null | undefined,
+      list: { id: number; name: string }[]
+    ) => {
       if (!value || list.length === 0) return
       const currentFormValue = form.getValues(fieldName)
       if (typeof value === 'string' && !currentFormValue) {
@@ -276,17 +299,58 @@ export function DealerSell() {
     if (genName && generations.length > 0) {
       if (generations.some((g) => g.name === genName)) {
         if (selectedGenerationName !== genName) {
+          // eslint-disable-next-line react-hooks/set-state-in-effect
           setSelectedGenerationName(genName)
         }
       }
     }
     
-    if (modifications.length > 0) {
+    if (generations.length > 0) {
        const modValue = d.modification
        const currentModId = form.getValues('modification_id')
-       const idInList = modifications.some((m) => m.id === currentModId)
        
-       if (!idInList && modValue) {
+       // Check if current modification is visible in the filtered list
+       const inFilteredList = modifications.some((m) => m.id === currentModId)
+       
+       if (!inFilteredList) {
+          // Try to find the modification in ALL generations to recover correct generation selection
+          let foundGenName = ''
+          let foundModId = 0
+          
+          // Helper to check if a mod matches criteria
+          type ModValue = number | string | { id?: number; engine?: string; fuel_type?: string; transmission?: string; drivetrain?: string } | null | undefined
+          const isMatch = (m: Modification, val: ModValue) => {
+             if (currentModId && m.id === currentModId) return true
+             if (typeof val === 'number' && m.id === val) return true
+             if (typeof val === 'string' && m.name === val) return true
+             if (typeof val === 'object' && val) {
+                if (val.id && m.id === val.id) return true
+                if (val.engine && m.engine === val.engine && 
+                    val.fuel_type === m.fuel_type && 
+                    val.transmission === m.transmission && 
+                    val.drivetrain === m.drivetrain) return true
+             }
+             return false
+          }
+
+          for (const gen of generations) {
+             if (gen.modifications?.some(m => isMatch(m, modValue))) {
+                foundGenName = gen.name
+                const match = gen.modifications.find(m => isMatch(m, modValue))
+                if (match) foundModId = match.id
+                break
+             }
+          }
+
+          if (foundGenName) {
+             if (selectedGenerationName !== foundGenName) {
+                setSelectedGenerationName(foundGenName)
+             }
+             if (foundModId && foundModId !== currentModId) {
+                form.setValue('modification_id', foundModId)
+             }
+          }
+       } else if (modValue && !currentModId) {
           if (typeof modValue === 'string') {
              const found = modifications.find((m) => m.name === modValue)
              if (found) form.setValue('modification_id', found.id)
@@ -314,12 +378,7 @@ export function DealerSell() {
           toast.success('Images uploaded successfully!')
         } catch (err: unknown) {
           console.error('Failed to upload images:', err)
-          const msg =
-            (err as { response?: { data?: { error?: string; message?: string } }; message?: string }).response?.data?.error ||
-            (err as { response?: { data?: { message?: string } } }).response?.data?.message ||
-            (err as Error).message ||
-            'Unknown error'
-          toast.error(`Failed to upload images: ${msg}`)
+          toast.error(getErrorMessage(err, 'Failed to upload images'))
         }
       }
       queryClient.invalidateQueries({ queryKey: ['dealer-cars-drafts'] })
@@ -328,10 +387,7 @@ export function DealerSell() {
     },
     onError: (error: unknown) => {
       console.error('Create car error:', error)
-      const msg =
-        (error as { response?: { data?: { message?: string } }; message?: string }).response?.data?.message ||
-        (error as Error).message ||
-        'Failed to create listing'
+      const msg = getErrorMessage(error, 'Failed to create listing')
       setError(msg)
       toast.error(msg)
     },
@@ -341,6 +397,7 @@ export function DealerSell() {
   const updateMutation = useMutation({
     mutationFn: updateDealerCar,
     onSuccess: async (_, variables) => {
+      props.onSuccess?.()
       toast.success('Car listing updated successfully!')
       if (images.length > 0) {
         try {
@@ -348,12 +405,7 @@ export function DealerSell() {
           toast.success('New images uploaded successfully!')
         } catch (err: unknown) {
           console.error('Failed to upload images:', err)
-          const msg =
-            (err as { response?: { data?: { error?: string; message?: string } }; message?: string }).response?.data?.error ||
-            (err as { response?: { data?: { message?: string } } }).response?.data?.message ||
-            (err as Error).message ||
-            'Unknown error'
-          toast.error(`Failed to upload images: ${msg}`)
+          toast.error(getErrorMessage(err, 'Failed to upload images'))
         }
       }
       queryClient.invalidateQueries({ queryKey: ['dealer-cars-drafts'] })
@@ -362,10 +414,7 @@ export function DealerSell() {
     },
     onError: (error: unknown) => {
       console.error('Update car error:', error)
-      const msg =
-        (error as { response?: { data?: { message?: string } }; message?: string }).response?.data?.message ||
-        (error as Error).message ||
-        'Failed to update listing'
+      const msg = getErrorMessage(error, 'Failed to update listing')
       setError(msg)
       toast.error(msg)
     },
@@ -383,72 +432,53 @@ export function DealerSell() {
     },
     onError: (error: unknown) => {
       console.error('Delete image error:', error)
-      const msg =
-        (error as { response?: { data?: { message?: string } }; message?: string }).response?.data?.message ||
-        (error as Error).message ||
-        'Failed to delete image'
-      toast.error(msg)
+      toast.error(getErrorMessage(error, 'Failed to delete image'))
     },
   })
 
-  // Reset effects (Same as original)
+  // Reset effects
   useEffect(() => {
-    if (brandId) {
-      const isEditMode = !!editId
-      if (isEditMode && !editData) return
-      if (isEditMode && editData && brandId == editData.brand?.id) return
+    if (brandId && form.formState.dirtyFields.brand_id) {
       form.setValue('model_id', undefined as unknown as number)
       form.setValue('year', undefined as unknown as number)
       form.setValue('body_type_id', undefined as unknown as number)
       form.setValue('generation_id', undefined as unknown as number)
       form.setValue('modification_id', undefined as unknown as number)
     }
-  }, [brandId, form, editData, editId])
+  }, [brandId, form.formState.dirtyFields.brand_id, form])
 
   useEffect(() => {
-    if (modelId) {
-      const isEditMode = !!editId
-      if (isEditMode && !editData) return
-      if (isEditMode && editData && modelId == editData.model?.id) return
+    if (modelId && form.formState.dirtyFields.model_id) {
       form.setValue('year', undefined as unknown as number)
       form.setValue('body_type_id', undefined as unknown as number)
       form.setValue('generation_id', undefined as unknown as number)
       form.setValue('modification_id', undefined as unknown as number)
     }
-  }, [modelId, form, editData, editId])
+  }, [modelId, form.formState.dirtyFields.model_id, form])
 
   useEffect(() => {
-    const isEditMode = !!editId
-    if (isEditMode && !editData) return
-    if (isEditMode && editData && wheel == editData.wheel) return
-    if (wheel !== undefined) {
+    if (wheel !== undefined && form.formState.dirtyFields.wheel) {
       form.setValue('year', undefined as unknown as number)
       form.setValue('body_type_id', undefined as unknown as number)
       form.setValue('generation_id', undefined as unknown as number)
       form.setValue('modification_id', undefined as unknown as number)
     }
-  }, [wheel, form, editData, editId])
+  }, [wheel, form.formState.dirtyFields.wheel, form])
 
   useEffect(() => {
-    if (year) {
-      const isEditMode = !!editId
-      if (isEditMode && !editData) return
-      if (isEditMode && editData && year === editData.year) return
+    if (year && form.formState.dirtyFields.year) {
       form.setValue('body_type_id', undefined as unknown as number)
       form.setValue('generation_id', undefined as unknown as number)
       form.setValue('modification_id', undefined as unknown as number)
     }
-  }, [year, form, editData, editId])
+  }, [year, form.formState.dirtyFields.year, form])
 
   useEffect(() => {
-    if (bodyTypeId) {
-      const isEditMode = !!editId
-      if (isEditMode && !editData) return
-      if (isEditMode && editData && bodyTypeId === editData.body_type?.id) return
+    if (bodyTypeId && form.formState.dirtyFields.body_type_id) {
       form.setValue('generation_id', undefined as unknown as number)
       form.setValue('modification_id', undefined as unknown as number)
     }
-  }, [bodyTypeId, form, editData, editId])
+  }, [bodyTypeId, form.formState.dirtyFields.body_type_id, form])
 
   const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files || [])
@@ -497,57 +527,7 @@ export function DealerSell() {
     }
   }
 
-  const handleVideoChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]
-    e.target.value = ''
-    if (!file || !editId) return
-    if (file.size > 100 * 1024 * 1024) {
-      toast.error('Video too large (max 100MB)')
-      return
-    }
-    setVideoUploading(true)
-    try {
-      await uploadDealerCarVideo(Number(editId), file)
-      toast.success('Video uploaded successfully')
-      // Optimistically add for preview
-      setExistingVideos((prev) => [...prev, ''])
-      // Refetch edit data if needed
-      queryClient.invalidateQueries({ queryKey: ['dealer-cars-drafts'] })
-      queryClient.invalidateQueries({ queryKey: ['dealer-cars-active'] })
-    } catch (err: unknown) {
-      const msg =
-        (err as { response?: { data?: { message?: string } }; message?: string }).response?.data?.message ||
-        (err as Error).message ||
-        'Failed to upload video'
-      toast.error(msg)
-    } finally {
-      setVideoUploading(false)
-    }
-  }
 
-  const removeExistingVideo = async (videoUrl: string) => {
-    if (!editId) return
-    if (window.confirm('Are you sure you want to delete this video?')) {
-      let path = videoUrl
-      if (videoUrl.startsWith('http')) {
-        const url = new URL(videoUrl)
-        path = url.pathname
-      }
-      try {
-        await deleteDealerCarVideo(Number(editId), path)
-        setExistingVideos((prev) => prev.filter((v) => v !== videoUrl))
-        toast.success('Video deleted successfully')
-        queryClient.invalidateQueries({ queryKey: ['dealer-cars-drafts'] })
-        queryClient.invalidateQueries({ queryKey: ['dealer-cars-active'] })
-      } catch (err: unknown) {
-        const msg =
-          (err as { response?: { data?: { message?: string } }; message?: string }).response?.data?.message ||
-          (err as Error).message ||
-          'Failed to delete video'
-        toast.error(msg)
-      }
-    }
-  }
 
   const addPhoneNumber = () => {
     if (phoneNumbers.length < 3) {
@@ -559,25 +539,41 @@ export function DealerSell() {
     const newPhones = [...phoneNumbers]
     newPhones[index] = value
     setPhoneNumbers(newPhones)
-    form.setValue('phone_numbers', newPhones.filter((p) => p.trim()))
+    form.setValue('phone_numbers', newPhones.filter((p) => p.trim()), { shouldDirty: true })
   }
 
   const removePhoneNumber = (index: number) => {
     if (phoneNumbers.length > 1) {
       const newPhones = phoneNumbers.filter((_, i) => i !== index)
       setPhoneNumbers(newPhones)
-      form.setValue('phone_numbers', newPhones.filter((p) => p.trim()))
+      form.setValue('phone_numbers', newPhones.filter((p) => p.trim()), { shouldDirty: true })
     }
   }
 
-  const onSubmit: SubmitHandler<SellFormData> = (data) => {
+  const onSubmit = (data: SellFormData) => {
     setError(null)
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
     const { generation_id, ...rest } = data
-    
+
+    // Find modification to get technical specs
+    const selectedMod = modifications.find(m => m.id === data.modification_id)
+    const technicalSpecs = selectedMod ? {
+       transmission_id: selectedMod.transmission_id,
+       drivetrain_id: selectedMod.drivetrain_id,
+       engine_id: selectedMod.engine_id,
+       fuel_type_id: selectedMod.fuel_type_id,
+    } : {}
+
+    // Ensure generation_id is sent. If missing in data, try to get from modification (though DealerSell structure might not have _genId on mod, we rely on data.generation_id or find it)
+    // In DealerSell, generation_id is managed via form state, so data.generation_id should be present.
+    // But we need to include it in payload.
+    const genId = data.generation_id
+
     if (editId) {
       const payload = {
         ...rest,
+        ...technicalSpecs,
+        generation_id: genId,
         id: Number(editId),
         phone_numbers: phoneNumbers.filter((p) => p.trim()),
         owners: typeof rest.owners === 'number' && !isNaN(rest.owners) ? rest.owners : 1
@@ -586,6 +582,8 @@ export function DealerSell() {
     } else {
       const payload = {
         ...rest,
+        ...technicalSpecs,
+        generation_id: genId,
         crash: rest.crash || false,
         new: rest.new || false,
         owners: rest.owners || 1,
@@ -667,45 +665,6 @@ export function DealerSell() {
             </CardContent>
         </Card>
 
-        {/* Videos */}
-        {editId && (
-          <Card className="border-2 border-dashed border-border/60">
-            <CardHeader>
-              <CardTitle>Videos</CardTitle>
-              <CardDescription>Upload a short walkthrough video (mp4). Max 100MB.</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                {existingVideos.map((videoUrl, index) => (
-                  <div key={`video-${index}`} className="relative">
-                    <video src={videoUrl} controls className="w-full rounded-lg bg-muted" />
-                    <button
-                      type="button"
-                      onClick={() => removeExistingVideo(videoUrl)}
-                      className="absolute -top-2 -right-2 bg-destructive text-destructive-foreground rounded-full p-1"
-                    >
-                      <X className="h-4 w-4" />
-                    </button>
-                  </div>
-                ))}
-                <label className="border-2 border-dashed border-border rounded-lg flex flex-col items-center justify-center cursor-pointer hover:border-primary hover:bg-muted/50 transition-colors p-6">
-                  <Upload className="h-6 w-6 text-muted-foreground mb-2" />
-                  <span className="text-xs text-muted-foreground font-medium">
-                    {videoUploading ? 'Uploading...' : 'Add video'}
-                  </span>
-                  <input
-                    type="file"
-                    accept="video/*"
-                    className="hidden"
-                    onChange={handleVideoChange}
-                    disabled={videoUploading}
-                  />
-                </label>
-              </div>
-            </CardContent>
-          </Card>
-        )}
-
           {/* Vehicle Information */}
           <Card>
             <CardHeader>
@@ -722,7 +681,7 @@ export function DealerSell() {
                     placeholder="Select brand"
                     searchPlaceholder="Search brand..."
                     value={brandId}
-                    onChange={(val) => form.setValue('brand_id', Number(val))}
+                    onChange={(val) => form.setValue('brand_id', Number(val), { shouldDirty: true })}
                   />
                   {form.formState.errors.brand_id && (
                     <p className="text-sm text-destructive">{form.formState.errors.brand_id.message}</p>
@@ -736,7 +695,7 @@ export function DealerSell() {
                     placeholder="Select model"
                     searchPlaceholder="Search model..."
                     value={modelId}
-                    onChange={(val) => form.setValue('model_id', Number(val))}
+                    onChange={(val) => form.setValue('model_id', Number(val), { shouldDirty: true })}
                     disabled={!brandId}
                   />
                   {form.formState.errors.model_id && (
@@ -751,7 +710,7 @@ export function DealerSell() {
                     placeholder="Select year"
                     searchPlaceholder="Search year..."
                     value={year}
-                    onChange={(val) => form.setValue('year', Number(val))}
+                    onChange={(val) => form.setValue('year', Number(val), { shouldDirty: true })}
                     disabled={!modelId}
                   />
                   {form.formState.errors.year && (
@@ -768,7 +727,7 @@ export function DealerSell() {
                         type="button"
                         variant={wheel === true ? 'default' : 'outline'}
                         className="flex-1"
-                        onClick={() => form.setValue('wheel', true)}
+                        onClick={() => form.setValue('wheel', true, { shouldDirty: true })}
                      >
                         Left
                      </Button>
@@ -776,7 +735,7 @@ export function DealerSell() {
                         type="button"
                         variant={wheel === false ? 'default' : 'outline'}
                         className="flex-1"
-                        onClick={() => form.setValue('wheel', false)}
+                        onClick={() => form.setValue('wheel', false, { shouldDirty: true })}
                      >
                         Right
                      </Button>
@@ -790,7 +749,7 @@ export function DealerSell() {
                         placeholder="Select body type"
                         searchPlaceholder="Search..."
                         value={bodyTypeId}
-                        onChange={(val) => form.setValue('body_type_id', Number(val))}
+                        onChange={(val) => form.setValue('body_type_id', Number(val), { shouldDirty: true })}
                         disabled={!year}
                      />
                   {form.formState.errors.body_type_id && (
@@ -857,7 +816,7 @@ export function DealerSell() {
                         placeholder="Select city"
                         searchPlaceholder="Search city..."
                         value={cityId}
-                        onChange={(val) => form.setValue('city_id', Number(val))}
+                        onChange={(val) => form.setValue('city_id', Number(val), { shouldDirty: true })}
                      />
                      {form.formState.errors.city_id && (
                         <p className="text-sm text-destructive">{form.formState.errors.city_id.message}</p>
@@ -871,7 +830,7 @@ export function DealerSell() {
                         placeholder="Select color"
                         searchPlaceholder="Search color..."
                         value={colorId}
-                        onChange={(val) => form.setValue('color_id', Number(val))}
+                        onChange={(val) => form.setValue('color_id', Number(val), { shouldDirty: true })}
                      />
                      {form.formState.errors.color_id && (
                         <p className="text-sm text-destructive">{form.formState.errors.color_id.message}</p>
@@ -930,7 +889,7 @@ export function DealerSell() {
                     ]}
                     placeholder="Select condition"
                     value={isNew ? 'new' : 'used'}
-                    onChange={(val) => form.setValue('new', String(val) === 'new')}
+                    onChange={(val) => form.setValue('new', String(val) === 'new', { shouldDirty: true })}
                   />
                 </div>
                 <div className="space-y-2">
@@ -942,7 +901,7 @@ export function DealerSell() {
                     ]}
                     placeholder="Accident history"
                     value={isCrash ? 'yes' : 'no'}
-                    onChange={(val) => form.setValue('crash', String(val) === 'yes')}
+                    onChange={(val) => form.setValue('crash', String(val) === 'yes', { shouldDirty: true })}
                   />
                 </div>
                 <div className="space-y-2">
@@ -958,7 +917,7 @@ export function DealerSell() {
                     ]}
                     placeholder="Trade-in option"
                     value={tradeIn}
-                    onChange={(val) => form.setValue('trade_in', Number(val))}
+                    onChange={(val) => form.setValue('trade_in', Number(val), { shouldDirty: true })}
                   />
                 </div>
               </div>
